@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>finprint · marine-mammal call classifier</title>
+<style>
+  :root {
+    --bg: #0b1622; --panel: #10233a; --panel2: #16324f;
+    --ink: #e7f0f7; --muted: #8fa9bd; --accent: #37c7c1; --accent2: #4b9fe1;
+    --bar: #1d3b5a; --good: #37c7c1; --warn: #f0a05a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1200px 600px at 70% -10%, #12314f 0%, var(--bg) 55%);
+    color: var(--ink); min-height: 100vh; line-height: 1.5;
+  }
+  header { padding: 34px 24px 12px; text-align: center; }
+  h1 { margin: 0; font-size: 30px; letter-spacing: .5px; }
+  h1 .fin { color: var(--accent); }
+  .sub { color: var(--muted); margin-top: 6px; font-size: 15px; }
+  main { max-width: 860px; margin: 0 auto; padding: 16px 20px 60px; }
+
+  .drop {
+    border: 2px dashed #2b4a6b; border-radius: 16px; padding: 34px 20px;
+    text-align: center; background: rgba(22,50,79,.35); transition: .15s;
+    cursor: pointer;
+  }
+  .drop.drag { border-color: var(--accent); background: rgba(55,199,193,.10); }
+  .drop p { margin: 6px 0; color: var(--muted); }
+  .row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
+  button {
+    background: linear-gradient(180deg, var(--accent2), #3b7fc0); color: #fff;
+    border: 0; padding: 11px 20px; border-radius: 10px; font-size: 15px;
+    cursor: pointer; font-weight: 600;
+  }
+  button.ghost { background: transparent; border: 1px solid #2b4a6b; color: var(--ink); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #rec.recording { background: linear-gradient(180deg,#e2565a,#c33a3f); }
+
+  .status { text-align: center; color: var(--muted); min-height: 22px; margin: 14px 0; }
+  .hidden { display: none; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 8px; }
+  @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid #1e3a58; border-radius: 14px; padding: 18px; }
+  .card h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--muted); font-weight: 700; }
+  .card.full { grid-column: 1 / -1; }
+
+  .pred { display: flex; align-items: center; justify-content: space-between; margin: 9px 0; }
+  .pred .name { font-size: 15px; }
+  .pred .name small { color: var(--muted); }
+  .track { flex: 1; height: 9px; background: var(--bar); border-radius: 6px; margin: 0 12px; overflow: hidden; }
+  .fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+  .pct { width: 52px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .top .name { font-weight: 700; font-size: 17px; }
+
+  .badge { display: inline-block; background: var(--panel2); padding: 4px 12px;
+    border-radius: 20px; font-weight: 700; color: var(--accent); }
+  .rationale { color: var(--muted); font-size: 14px; margin-top: 10px; font-style: italic; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 6px 4px; border-bottom: 1px solid #1a3452; }
+  td.k { color: var(--muted); } td.v { text-align: right; font-variant-numeric: tabular-nums; }
+  img.spec { width: 100%; border-radius: 10px; border: 1px solid #1e3a58; }
+  .note { font-size: 13px; color: var(--warn); margin-top: 8px; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px; }
+  audio { width: 100%; margin-top: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="fin">fin</span>print</h1>
+  <div class="sub">Upload or record a marine-mammal call → species + call type</div>
+</header>
+
+<main>
+  <div id="drop" class="drop">
+    <p style="font-size:17px;color:var(--ink)">Drop an audio clip here</p>
+    <p>wav · flac · mp3 · m4a · ogg — or use the buttons below</p>
+    <div class="row">
+      <button id="pick">Choose file</button>
+      <button id="rec" class="ghost">● Record</button>
+    </div>
+    <input id="file" type="file" accept="audio/*" class="hidden" />
+  </div>
+
+  <audio id="player" class="hidden" controls></audio>
+  <div id="status" class="status"></div>
+
+  <section id="results" class="hidden">
+    <div class="grid">
+      <div class="card" id="speciesCard">
+        <h2>Species</h2>
+        <div id="species"></div>
+        <div id="noModel" class="note hidden">No trained model loaded yet — run training to enable species prediction.</div>
+      </div>
+      <div class="card">
+        <h2>Call type</h2>
+        <div><span id="callLabel" class="badge"></span> <span id="callConf" class="pct"></span></div>
+        <div id="callScores" style="margin-top:12px"></div>
+        <div id="callRationale" class="rationale"></div>
+      </div>
+      <div class="card full">
+        <h2>Spectrogram</h2>
+        <img id="spec" class="spec" alt="spectrogram" />
+      </div>
+      <div class="card full">
+        <h2>Acoustic features</h2>
+        <table id="features"></table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>finprint · trained on the Watkins Marine Mammal Sound Database · academic use only</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const drop = $("#drop"), fileInput = $("#file"), status = $("#status"),
+      results = $("#results"), player = $("#player");
+
+$("#pick").onclick = () => fileInput.click();
+fileInput.onchange = e => { if (e.target.files[0]) send(e.target.files[0]); };
+
+["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.add("drag"); }));
+["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.remove("drag"); }));
+drop.addEventListener("drop", e => { if (e.dataTransfer.files[0]) send(e.dataTransfer.files[0]); });
+
+// --- recording ---
+let mediaRec, chunks = [];
+$("#rec").onclick = async function () {
+  if (mediaRec && mediaRec.state === "recording") { mediaRec.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRec = new MediaRecorder(stream); chunks = [];
+    mediaRec.ondataavailable = e => chunks.push(e.data);
+    mediaRec.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(chunks, { type: mediaRec.mimeType || "audio/webm" });
+      send(new File([blob], "recording.webm", { type: blob.type }));
+      this.classList.remove("recording"); this.textContent = "● Record";
+    };
+    mediaRec.start(); this.classList.add("recording"); this.textContent = "■ Stop";
+  } catch (err) { status.textContent = "Microphone unavailable: " + err.message; }
+};
+
+// --- send + render ---
+async function send(file) {
+  results.classList.add("hidden");
+  player.src = URL.createObjectURL(file); player.classList.remove("hidden");
+  status.textContent = "Analyzing " + file.name + " …";
+  const fd = new FormData(); fd.append("file", file);
+  try {
+    const r = await fetch("/api/predict", { method: "POST", body: fd });
+    if (!r.ok) { status.textContent = "Error: " + (await r.text()); return; }
+    render(await r.json()); status.textContent = "";
+  } catch (err) { status.textContent = "Request failed: " + err.message; }
+}
+
+function bar(name, sub, pct, top) {
+  return `<div class="pred ${top ? "top" : ""}">
+    <span class="name">${name}${sub ? ` <small>${sub}</small>` : ""}</span>
+    <span class="track"><span class="fill" style="width:${(pct*100).toFixed(1)}%"></span></span>
+    <span class="pct">${(pct*100).toFixed(1)}%</span></div>`;
+}
+
+const FEATURE_LABELS = {
+  duration_s: "Duration (s)", dominant_freq_hz: "Dominant freq (Hz)",
+  spectral_centroid_hz: "Spectral centroid (Hz)", bandwidth_hz: "Bandwidth (Hz)",
+  low_freq_hz: "Low edge (Hz)", high_freq_hz: "High edge (Hz)",
+  spectral_flatness: "Spectral flatness", zero_crossing_rate: "Zero-crossing rate",
+  f0_mean_hz: "Pitch f0 mean (Hz)", f0_range_hz: "Pitch f0 range (Hz)",
+  voiced_fraction: "Voiced fraction", pulse_rate_hz: "Pulse rate (Hz)",
+};
+
+function render(d) {
+  results.classList.remove("hidden");
+  // species
+  const sc = $("#species"), nm = $("#noModel");
+  if (d.species) {
+    nm.classList.add("hidden");
+    sc.innerHTML = d.species.map((s, i) =>
+      bar(s.species, i === 0 ? "top match" : "", s.confidence, i === 0)).join("");
+  } else { sc.innerHTML = ""; nm.classList.remove("hidden"); }
+  // call type
+  $("#callLabel").textContent = d.call_type.label;
+  $("#callConf").textContent = (d.call_type.confidence*100).toFixed(0) + "%";
+  $("#callScores").innerHTML = Object.entries(d.call_type.scores)
+    .map(([k, v]) => bar(k, "", v, false)).join("");
+  $("#callRationale").textContent = "Why: " + d.call_type.rationale;
+  // spectrogram
+  $("#spec").src = d.spectrogram;
+  // features
+  $("#features").innerHTML = Object.entries(d.features).map(([k, v]) =>
+    `<tr><td class="k">${FEATURE_LABELS[k] || k}</td><td class="v">${v}</td></tr>`).join("");
+}
+</script>
+</body>
+</html>

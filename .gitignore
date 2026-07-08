@@ -1,0 +1,16 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# data & artifacts (regenerate with the pipeline)
+data/
+models/*.pt
+reports/*.png
+
+# hf cache
+.cache/
+
+# os
+.DS_Store
