@@ -1,12 +1,29 @@
 # Deploying finprint
 
 finprint ships as a single container (`Dockerfile`): a FastAPI app serving the
-UI and `/api/predict`. Both hosts below build the image **remotely**, so you do
+UI and `/api/predict`. Every host below builds the image **remotely**, so you do
 not need Docker installed locally.
 
 Pick one:
 
-## Fly.io  (`fly.toml` included)
+## Hugging Face Spaces — free, recommended
+
+Free tier is 2 vCPU / 16 GB RAM with Docker support and no credit card — plenty
+for torch. The `README.md` frontmatter (`sdk: docker`, `app_port: 8000`) already
+marks this repo as a Docker Space; the `Dockerfile` is used as-is.
+
+```bash
+pip install -U "huggingface_hub[cli]"
+hf auth login                                   # paste a token from hf.co/settings/tokens
+hf repo create finprint --repo-type space --space_sdk docker
+git remote add space https://huggingface.co/spaces/<your-username>/finprint
+git push space main                             # builds & deploys automatically
+```
+
+Serves at `https://<your-username>-finprint.hf.space`. Free Spaces sleep after
+~48 h idle and wake on the next visit.
+
+## Fly.io  (`fly.toml` included) — not free
 
 ```bash
 # one-time

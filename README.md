@@ -1,3 +1,13 @@
+---
+title: finprint
+emoji: 🐋
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 8000
+pinned: false
+---
+
 # finprint 🐋
 
 **Marine-mammal call classifier.** Upload or record an audio clip; finprint
