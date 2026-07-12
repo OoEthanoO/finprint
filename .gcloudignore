@@ -1,0 +1,14 @@
+# Cloud Build source upload — keep it to what the Dockerfile needs.
+.git
+.gitignore
+.gcloudignore
+.venv/
+__pycache__/
+*.py[cod]
+.cache/
+data/
+reports/*.png
+.claude/
+fly.toml
+render.yaml
+DEPLOY.md

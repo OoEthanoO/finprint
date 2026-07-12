@@ -4,26 +4,39 @@ finprint ships as a single container (`Dockerfile`): a FastAPI app serving the
 UI and `/api/predict`. Every host below builds the image **remotely**, so you do
 not need Docker installed locally.
 
-Pick one:
+## Google Cloud Run — the live deployment
 
-## Hugging Face Spaces — free, recommended
+Deployed as service **`finprint`** in project **`study-autopilot`**, region
+**`us-central1`**, serving at:
 
-Free tier is 2 vCPU / 16 GB RAM with Docker support and no credit card — plenty
-for torch. The `README.md` frontmatter (`sdk: docker`, `app_port: 8000`) already
-marks this repo as a Docker Space; the `Dockerfile` is used as-is.
+- https://finprint.ethanyanxu.com (custom domain mapping)
+- https://finprint-999841164638.us-central1.run.app (direct)
+
+Free-tier friendly: 2 GB RAM, scale-to-zero, and demo traffic stays inside the
+always-free quota. Cloud Build compiles the `Dockerfile` remotely (no local
+Docker; `.gcloudignore` trims the upload).
 
 ```bash
-pip install -U "huggingface_hub[cli]"
-hf auth login                                   # paste a token from hf.co/settings/tokens
-hf repo create finprint --repo-type space --space_sdk docker
-git remote add space https://huggingface.co/spaces/<your-username>/finprint
-git push space main                             # builds & deploys automatically
+# redeploy after changes
+gcloud run deploy finprint --source . --memory 2Gi --cpu 1 \
+  --region us-central1 --project study-autopilot --allow-unauthenticated
 ```
 
-Serves at `https://<your-username>-finprint.hf.space`. Free Spaces sleep after
-~48 h idle and wake on the next visit.
+The custom domain was wired once and needs no maintenance:
 
-## Fly.io  (`fly.toml` included) — not free
+```bash
+gcloud beta run domain-mappings create --service finprint \
+  --domain finprint.ethanyanxu.com --region us-central1 --project study-autopilot
+vercel dns add ethanyanxu.com finprint CNAME ghs.googlehosted.com
+```
+
+## Alternatives (config kept in-repo, not currently used)
+
+> Hugging Face Spaces was ruled out: Docker Spaces moved behind a paid plan
+> (mid-2026) and Spaces never supported custom domains. The `README.md`
+> frontmatter for it is harmless and kept in case that changes.
+
+### Fly.io  (`fly.toml` included) — not free
 
 ```bash
 # one-time
@@ -38,14 +51,14 @@ fly deploy
 Serves at `https://<app-name>.fly.dev`. The config runs a 2 GB shared-cpu VM
 (torch OOMs on the 256 MB default) and health-checks `/api/health`.
 
-## Render  (`render.yaml` Blueprint included)
+### Render  (`render.yaml` Blueprint included) — 2 GB tier is paid
 
 1. Push this repo to GitHub.
 2. Render Dashboard → **New → Blueprint** → select the repo.
 3. Render reads `render.yaml`, builds the Dockerfile, and deploys on the
    **Standard** plan (2 GB — Free/Starter's 512 MB OOMs on torch).
 
-## Local Docker (to test the exact image)
+### Local Docker (to test the exact image)
 
 ```bash
 docker build -t finprint .
