@@ -1,0 +1,15 @@
+# Render Blueprint for finprint.
+# Push this repo to GitHub, then: Render Dashboard -> New -> Blueprint -> pick the repo.
+services:
+  - type: web
+    name: finprint
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Free/Starter (512 MB) OOMs loading torch; Standard = 2 GB.
+    plan: standard
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # Render injects PORT at runtime; the Dockerfile CMD honors it.
+      - key: PORT
+        value: 8000

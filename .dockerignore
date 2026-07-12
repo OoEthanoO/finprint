@@ -1,0 +1,18 @@
+# keep the build context small & the image clean
+.git
+.gitignore
+.venv
+__pycache__
+**/__pycache__
+*.py[cod]
+*.egg-info
+.cache
+.DS_Store
+
+# regenerable / large artifacts — not needed to serve
+data/
+reports/*.png
+
+# local tooling
+.claude/
+scratchpad/

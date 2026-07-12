@@ -1,0 +1,43 @@
+# finprint — production image for a container host (Fly.io, Render, Cloud Run, …)
+#
+# Pinned to Python 3.11 (the version the project targets) so torch/torchaudio
+# have wheels — independent of whatever Python the host machine happens to run.
+# torch + torchaudio come from the CPU wheel index: no CUDA, ~1.5 GB image
+# instead of ~5 GB, and this app does inference on CPU anyway.
+
+FROM python:3.11-slim AS runtime
+
+# Audio decoding: libsndfile for soundfile (wav/flac/ogg), ffmpeg for the
+# compressed formats the API accepts (mp3/m4a/webm) via librosa's audioread path.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg libsndfile1 \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    # matplotlib (Agg) needs a writable config dir under the non-root user
+    MPLCONFIGDIR=/tmp/mpl \
+    PORT=8000
+
+WORKDIR /app
+
+# Dependencies first so the layer caches across code changes.
+COPY requirements.txt .
+RUN pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cpu torch torchaudio \
+ && pip install --no-cache-dir -r requirements.txt
+
+# App code (config.py creates data/ models/ reports/ under /app at import,
+# so /app must be writable by the runtime user).
+COPY . .
+
+RUN useradd --create-home --uid 10001 appuser \
+ && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+# Hosts inject $PORT; default to 8000 for a plain `docker run`.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
