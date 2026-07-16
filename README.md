@@ -38,12 +38,16 @@ prediction ships with the numbers and the reason it was chosen.
 ## Architecture
 
 ```
-audio file ──▶ load @ 32 kHz, mono
-           │
-           ├─▶ highest-energy 4 s window ─▶ log-mel spectrogram ─▶ CNN ─▶ species (top-3)
-           │
-           └─▶ librosa DSP ─▶ acoustic features ─▶ rule-based classifier ─▶ call type
+audio file ──▶ load @ 32 kHz, mono ──▶ highest-energy 4 s window
+                                   │
+                                   ├─▶ log-mel spectrogram ─▶ CNN ─▶ species (top-3)
+                                   │
+                                   └─▶ librosa DSP ─▶ acoustic features ─▶ call type (rules)
 ```
+
+Both branches read the same 4 s window, so the species, the call type, and the
+printed numbers all describe one call rather than two minutes of ocean. Reported
+*duration* is the exception: it measures the whole trimmed recording.
 
 - **Species model** — 4-block conv net over 128-bin log-mel spectrograms, global
   average pooling, class-weighted cross-entropy, SpecAugment, early stopping on

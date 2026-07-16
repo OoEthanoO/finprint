@@ -39,6 +39,12 @@ F_MAX = SAMPLE_RATE / 2
 # Coarse stride (samples) for the energy-based window search.
 ENERGY_WIN_STRIDE = SAMPLE_RATE // 4
 
+# The DSP layer measures the same-size highest-energy window the CNN sees, so
+# the printed numbers describe the call rather than two minutes of ocean, and so
+# pitch tracking (cost grows with length) stays bounded on a 114 s clip.
+ANALYSIS_SECONDS = CLIP_SECONDS
+ANALYSIS_SAMPLES = int(SAMPLE_RATE * ANALYSIS_SECONDS)
+
 # Number of mel frames in one clip (used to size the model / augmentation).
 N_FRAMES = N_SAMPLES // HOP_LENGTH + 1
 

@@ -4,6 +4,10 @@ Turns a mono waveform into the interpretable numbers a bioacoustician reads off
 a spectrogram: dominant frequency, bandwidth, tonality, pitch (f0) contour, and
 pulse-repetition rate. These feed the call-type classifier and are shown in the
 app so a prediction is explainable, not a black box.
+
+Everything except duration is measured on the loudest C.ANALYSIS_SECONDS of the
+clip -- the same window the species CNN classifies. Duration still describes the
+whole trimmed recording.
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ import librosa
 import numpy as np
 
 from . import config as C
+from .audio import loudest_window
 
 # f0 search range for marine-mammal tonal sounds (Hz).
 _F0_MIN = 40.0
@@ -22,7 +27,7 @@ _F0_MAX = min(4000.0, C.SAMPLE_RATE / 2 - 100)
 
 @dataclass
 class AcousticFeatures:
-    duration_s: float
+    duration_s: float           # of the whole trimmed clip, not the analysis window
     dominant_freq_hz: float
     spectral_centroid_hz: float
     bandwidth_hz: float
@@ -51,6 +56,21 @@ def _energy_edges(mag: np.ndarray, freqs: np.ndarray) -> tuple[float, float]:
     return lo, hi
 
 
+def _autocorrelate(env: np.ndarray) -> np.ndarray:
+    """Linear autocorrelation at non-negative lags.
+
+    Same result as np.correlate(env, env, mode="full")[len(env) - 1:], but via
+    FFT, so O(N log N) rather than O(N^2). The direct form costs ~14 minutes on
+    a 90 s clip at 32 kHz; this takes well under a second.
+    """
+    n = len(env)
+    # Zero-pad past 2N-1 so the circular correlation the FFT computes equals the
+    # linear one we want.
+    nfft = 1 << (2 * n - 1).bit_length()
+    spec = np.fft.rfft(env.astype(np.float64), nfft)
+    return np.fft.irfft(np.abs(spec) ** 2, nfft)[:n]
+
+
 def _pulse_rate(wav: np.ndarray, sr: int) -> float:
     """Estimate envelope repetition rate via autocorrelation (Hz), or 0 if none.
 
@@ -65,7 +85,7 @@ def _pulse_rate(wav: np.ndarray, sr: int) -> float:
     env = env - env.mean()
     if np.allclose(env, 0):
         return 0.0
-    ac = np.correlate(env, env, mode="full")[len(env) - 1:]
+    ac = _autocorrelate(env)
     if ac[0] <= 0:
         return 0.0
     ac = ac / ac[0]
@@ -94,9 +114,16 @@ def extract(wav: np.ndarray, sr: int = C.SAMPLE_RATE) -> AcousticFeatures:
         trimmed = wav
     duration = len(trimmed) / sr
 
-    n_fft = min(C.N_FFT, len(trimmed)) if len(trimmed) >= 256 else 256
+    # Measure the loudest ANALYSIS_SECONDS rather than the whole recording. Pitch
+    # tracking and envelope autocorrelation both cost time proportional to length,
+    # and a 2-minute upload otherwise turns one request into minutes of CPU. This
+    # is also the window the species CNN sees, so the numbers below describe the
+    # call it classified. Clips already shorter than the window are measured whole.
+    seg = loudest_window(trimmed, C.ANALYSIS_SAMPLES)
+
+    n_fft = min(C.N_FFT, len(seg)) if len(seg) >= 256 else 256
     hop = n_fft // 4
-    S = np.abs(librosa.stft(trimmed, n_fft=n_fft, hop_length=hop)) + 1e-10
+    S = np.abs(librosa.stft(seg, n_fft=n_fft, hop_length=hop)) + 1e-10
     freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
 
     # Separate the call (loud frames) from the background (quiet frames).
@@ -120,11 +147,11 @@ def extract(wav: np.ndarray, sr: int = C.SAMPLE_RATE) -> AcousticFeatures:
     dominant = float(freqs[int(np.argmax(call_spec))])
     centroid = float(np.mean(librosa.feature.spectral_centroid(S=Scl, sr=sr)))
     bandwidth = float(np.mean(librosa.feature.spectral_bandwidth(S=Scl, sr=sr)))
-    zcr = float(np.mean(librosa.feature.zero_crossing_rate(trimmed)))
+    zcr = float(np.mean(librosa.feature.zero_crossing_rate(seg)))
     lo, hi = _energy_edges(Scl, freqs)
 
-    f0_mean, f0_range, voiced = _pitch(trimmed, sr)
-    pulse = _pulse_rate(trimmed, sr)
+    f0_mean, f0_range, voiced = _pitch(seg, sr)
+    pulse = _pulse_rate(seg, sr)
 
     return AcousticFeatures(
         duration_s=round(duration, 4),
