@@ -33,6 +33,12 @@ finprint classifies calls by their **acoustic structure**, which is real,
 measurable, and how bioacousticians actually categorize calls. Every call-type
 prediction ships with the numbers and the reason it was chosen.
 
+**Species is always one of the 32.** The CNN can only name a species it was
+trained on, so a clip from any other animal (a blue whale, say) still comes back
+as its nearest match. When the top score is below **0.5** — the point where
+held-out accuracy drops from ~95% to ~63% — the app labels the prediction
+*low confidence* instead of presenting it as certain.
+
 ---
 
 ## Architecture
@@ -96,6 +102,20 @@ uvicorn app.main:app --reload
 The web app works without step 2 — you'll still get call type, features, and the
 spectrogram; species prediction simply stays disabled until a model is trained.
 
+The API caps uploads at **25 MB** and decodes at most the **first 10 minutes** of
+audio, so one large file can't exhaust the small serving instance
+(see [`finprint/config.py`](finprint/config.py)).
+
+## Tests
+
+```bash
+pytest tests/
+```
+
+Covers the windowing invariants, the FFT-autocorrelation equivalence (a guard
+against the O(N²) form that used to hang on long clips), the call-type rules, and
+the HTTP contract including the upload guard.
+
 ---
 
 ## Results
@@ -106,12 +126,12 @@ Held-out **WMMS test split** (340 clips, 32 species), from
 
 | Metric | Test |
 |---|---|
-| Accuracy | **0.794** |
-| Top-3 accuracy | **0.915** |
-| Macro-F1 | **0.802** |
+| Accuracy | **0.788** |
+| Top-3 accuracy | **0.921** |
+| Macro-F1 | **0.798** |
 
 Trained in ~2 min on an Apple-Silicon GPU (MPS), 60 epochs, best model chosen by
-validation macro-F1 (0.894).
+validation macro-F1 (0.899).
 
 ---
 
@@ -121,9 +141,10 @@ validation macro-F1 (0.894).
 finprint/
 ├── finprint/          core package (audio, model, features, calltype, train, evaluate, predict)
 ├── app/               FastAPI backend + single-page UI
+├── tests/             pytest suite (DSP, call type, API)
 ├── scripts/           prepare_data.py
 ├── data/              downloaded dataset + cached spectrograms  (gitignored)
-├── models/            trained checkpoint + label map            (gitignored)
+├── models/            trained checkpoint (committed, ~2.3 MB) + label/norm JSON
 └── reports/           metrics + confusion matrix
 ```
 

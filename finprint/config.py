@@ -48,6 +48,15 @@ ANALYSIS_SAMPLES = int(SAMPLE_RATE * ANALYSIS_SECONDS)
 # Number of mel frames in one clip (used to size the model / augmentation).
 N_FRAMES = N_SAMPLES // HOP_LENGTH + 1
 
+# --- serving limits ------------------------------------------------------
+# The public demo runs on a single small scale-to-zero instance, so one large
+# upload must not be able to exhaust its memory or monopolize the worker.
+# librosa decodes audio into a float32 array (4 bytes/sample), i.e. ~128 KB per
+# second at SAMPLE_RATE, so these two caps bound both the bytes on the wire and
+# the size of the decoded array.
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024      # reject the request above this (~25 MB)
+MAX_AUDIO_SECONDS = 600.0                # decode at most the first 10 minutes
+
 # --- training ------------------------------------------------------------
 SEED = 1234
 BATCH_SIZE = 32

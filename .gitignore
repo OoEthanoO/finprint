@@ -6,7 +6,10 @@ __pycache__/
 
 # data & artifacts (regenerate with the pipeline)
 data/
+# ignore scratch checkpoints, but track the one the app serves so a fresh
+# clone can deploy species without retraining
 models/*.pt
+!models/species_cnn.pt
 reports/*.png
 
 # hf cache

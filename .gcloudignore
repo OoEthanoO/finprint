@@ -8,6 +8,7 @@ __pycache__/
 .cache/
 data/
 reports/*.png
+tests/
 .claude/
 fly.toml
 render.yaml

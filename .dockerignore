@@ -13,6 +13,9 @@ __pycache__
 data/
 reports/*.png
 
+# tests aren't run in the serving image (pytest isn't a runtime dependency)
+tests/
+
 # local tooling
 .claude/
 scratchpad/

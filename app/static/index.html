@@ -95,6 +95,7 @@
       <div class="card" id="speciesCard">
         <h2>Species</h2>
         <div id="species"></div>
+        <div id="lowConf" class="note hidden">Low confidence — this call may be from a species finprint wasn't trained on (it knows 32).</div>
         <div id="noModel" class="note hidden">No trained model loaded yet — run training to enable species prediction.</div>
       </div>
       <div class="card">
@@ -121,6 +122,11 @@
 const $ = s => document.querySelector(s);
 const drop = $("#drop"), fileInput = $("#file"), status = $("#status"),
       results = $("#results"), player = $("#player");
+
+// Server-authoritative limits; fetched so the client can reject an oversized
+// file with a friendly message before uploading. The server enforces them too.
+let limits = { max_upload_bytes: 25 * 1024 * 1024 };
+fetch("/api/health").then(r => r.json()).then(h => { limits = h; }).catch(() => {});
 
 $("#pick").onclick = () => fileInput.click();
 fileInput.onchange = e => { if (e.target.files[0]) send(e.target.files[0]); };
@@ -151,6 +157,11 @@ $("#rec").onclick = async function () {
 
 // --- send + render ---
 async function send(file) {
+  if (limits.max_upload_bytes && file.size > limits.max_upload_bytes) {
+    const mb = Math.round(limits.max_upload_bytes / (1024 * 1024));
+    status.textContent = `That file is ${(file.size/1048576).toFixed(1)} MB — the limit is ${mb} MB.`;
+    return;
+  }
   results.classList.add("hidden");
   player.src = URL.createObjectURL(file); player.classList.remove("hidden");
   status.textContent = "Analyzing " + file.name + " …";
@@ -181,12 +192,19 @@ const FEATURE_LABELS = {
 function render(d) {
   results.classList.remove("hidden");
   // species
-  const sc = $("#species"), nm = $("#noModel");
+  const sc = $("#species"), nm = $("#noModel"), lc = $("#lowConf");
   if (d.species) {
     nm.classList.add("hidden");
+    // The model always names its closest of 32 species; a low top score means
+    // the real answer may be outside that set (e.g. a blue whale it never saw).
+    // On the held-out test split, predictions >=0.5 are ~95% correct vs ~63%
+    // below, so 0.5 is the honesty line between "trust this" and "maybe not".
+    const low = d.species[0].confidence < 0.5;
     sc.innerHTML = d.species.map((s, i) =>
-      bar(s.species, i === 0 ? "top match" : "", s.confidence, i === 0)).join("");
-  } else { sc.innerHTML = ""; nm.classList.remove("hidden"); }
+      bar(s.species, i === 0 ? (low ? "low confidence" : "top match") : "",
+          s.confidence, i === 0)).join("");
+    lc.classList.toggle("hidden", !low);
+  } else { sc.innerHTML = ""; lc.classList.add("hidden"); nm.classList.remove("hidden"); }
   // call type
   $("#callLabel").textContent = d.call_type.label;
   $("#callConf").textContent = (d.call_type.confidence*100).toFixed(0) + "%";

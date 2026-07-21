@@ -70,14 +70,14 @@ docker run -p 8000:8000 finprint
 
 ## Notes
 
-- **Species prediction is disabled until you add the model.** The trained
-  checkpoint `models/species_cnn.pt` is gitignored and not in the repo, so
-  `/api/predict` returns `model_available: false` — call type, acoustic
-  features, and the spectrogram still work. To enable species classification,
-  produce the checkpoint (`python -m scripts.prepare_data && python -m
-  finprint.train`) and ship it in the image — either commit it, or add a build
-  step / volume that places it at `models/species_cnn.pt`. It's loaded lazily on
-  the first request.
+- **The trained model ships in the repo.** `models/species_cnn.pt` (~2.3 MB) is
+  committed — `.gitignore` tracks that one checkpoint while ignoring any other
+  `*.pt` — so `COPY . .` bakes it into the image and species prediction works on
+  a fresh clone with no retraining. It's loaded lazily on the first request. If
+  the checkpoint is ever missing, `/api/predict` still returns call type,
+  acoustic features, and the spectrogram, with `model_available: false`. To
+  refresh it, retrain (`python -m scripts.prepare_data && python -m
+  finprint.train`) and commit the new file.
 - **Memory.** torch + librosa need ~1–2 GB resident; both configs above provision
   2 GB. Dropping below that risks OOM on model/library load.
 - **CPU-only.** The image installs CPU torch wheels; inference runs on CPU.

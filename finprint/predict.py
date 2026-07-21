@@ -73,7 +73,13 @@ def _spectrogram_png(wav: np.ndarray) -> str:
 
 
 def predict(audio_path: str, with_spectrogram: bool = True) -> dict:
-    wav, _ = librosa.load(audio_path, sr=C.SAMPLE_RATE, mono=True)
+    # Decode at most MAX_AUDIO_SECONDS. Anything under that (every normal clip)
+    # is loaded whole and unchanged; a pathologically long file is truncated to
+    # its first 10 minutes rather than being allowed to decode into gigabytes.
+    # The loudest-window search then runs over whatever was decoded.
+    wav, _ = librosa.load(
+        audio_path, sr=C.SAMPLE_RATE, mono=True, duration=C.MAX_AUDIO_SECONDS
+    )
     if wav.size == 0:
         raise ValueError("empty audio")
 
