@@ -17,8 +17,12 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    # matplotlib (Agg) needs a writable config dir under the non-root user
-    MPLCONFIGDIR=/tmp/mpl \
+    # Cache dirs baked into the image and pre-populated by scripts.warmup below.
+    # Under /tmp these would be empty on every cold start, and rebuilding them
+    # (matplotlib fonts, numba JIT of librosa's pitch kernels) costs ~50 s
+    # inside the first request.
+    MPLCONFIGDIR=/opt/caches/mpl \
+    NUMBA_CACHE_DIR=/opt/caches/numba \
     PORT=8000
 
 WORKDIR /app
@@ -34,8 +38,13 @@ RUN pip install --no-cache-dir \
 COPY . .
 
 RUN useradd --create-home --uid 10001 appuser \
- && chown -R appuser:appuser /app
+ && mkdir -p /opt/caches/mpl /opt/caches/numba \
+ && chown -R appuser:appuser /app /opt/caches
 USER appuser
+
+# Populate the caches as the runtime user, so they are readable (and the numba
+# cache keys match) when the same user serves requests.
+RUN python -m scripts.warmup
 
 EXPOSE 8000
 

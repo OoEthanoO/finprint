@@ -78,6 +78,14 @@ docker run -p 8000:8000 finprint
   acoustic features, and the spectrogram, with `model_available: false`. To
   refresh it, retrain (`python -m scripts.prepare_data && python -m
   finprint.train`) and commit the new file.
+- **Cold starts.** The service scales to zero, so the first request after an idle
+  period boots a container. `scripts/warmup.py` runs at image build time and
+  bakes the matplotlib font cache and numba's JIT artifacts into `/opt/caches`
+  (`MPLCONFIGDIR` / `NUMBA_CACHE_DIR`); without it a cold instance rebuilt both
+  *inside* the first request. Startup CPU boost is enabled on the service. What
+  remains on a cold start — Python imports of torch/librosa and the checkpoint
+  load — is per-process and unavoidable short of paying for a warm instance
+  (`--min-instances 1`).
 - **Memory.** torch + librosa need ~1–2 GB resident; both configs above provision
   2 GB. Dropping below that risks OOM on model/library load.
 - **CPU-only.** The image installs CPU torch wheels; inference runs on CPU.

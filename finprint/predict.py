@@ -12,6 +12,9 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
+import time
+from contextlib import contextmanager
 from functools import lru_cache
 
 import librosa
@@ -23,6 +26,23 @@ from .audio import logmel
 from .calltype import classify
 from .features import extract
 from .model import SpeciesCNN
+
+log = logging.getLogger(__name__)
+
+
+@contextmanager
+def _timed(stage: str, into: dict):
+    """Record how long a stage took, so slow requests can be attributed to one.
+
+    Worth having in the log: the first prediction in a fresh process is far
+    slower than the rest (JIT + checkpoint load), and this says which stage
+    absorbed it.
+    """
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        into[stage] = round(time.perf_counter() - start, 3)
 
 
 @lru_cache(maxsize=1)
@@ -77,15 +97,19 @@ def predict(audio_path: str, with_spectrogram: bool = True) -> dict:
     # is loaded whole and unchanged; a pathologically long file is truncated to
     # its first 10 minutes rather than being allowed to decode into gigabytes.
     # The loudest-window search then runs over whatever was decoded.
-    wav, _ = librosa.load(
-        audio_path, sr=C.SAMPLE_RATE, mono=True, duration=C.MAX_AUDIO_SECONDS
-    )
+    timings: dict[str, float] = {}
+    with _timed("decode", timings):
+        wav, _ = librosa.load(
+            audio_path, sr=C.SAMPLE_RATE, mono=True, duration=C.MAX_AUDIO_SECONDS
+        )
     if wav.size == 0:
         raise ValueError("empty audio")
 
-    feats = extract(wav)
+    with _timed("features", timings):
+        feats = extract(wav)
     call = classify(feats)
-    species = _species_topk(wav)
+    with _timed("species", timings):
+        species = _species_topk(wav)
 
     result = {
         "species": species,                          # None if no trained model yet
@@ -99,7 +123,13 @@ def predict(audio_path: str, with_spectrogram: bool = True) -> dict:
         "model_available": species is not None,
     }
     if with_spectrogram:
-        result["spectrogram"] = _spectrogram_png(wav)
+        with _timed("spectrogram", timings):
+            result["spectrogram"] = _spectrogram_png(wav)
+
+    log.info(
+        "predict %.1fs audio in %.1fs %s",
+        len(wav) / C.SAMPLE_RATE, sum(timings.values()), timings,
+    )
     return result
 
 
