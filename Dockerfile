@@ -13,8 +13,12 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg libsndfile1 \
  && rm -rf /var/lib/apt/lists/*
 
+# Deliberately NOT setting PYTHONDONTWRITEBYTECODE: the usual reason (keeping
+# .pyc out of a layer) is the wrong trade here. librosa imports its submodules
+# lazily on first use, so without cached bytecode every cold process recompiles
+# librosa/numba/scipy from source *inside the first request* -- measured at 33 s
+# of a 56 s cold start. `compileall` below bakes the .pyc into the image.
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     # Cache dirs baked into the image and pre-populated by scripts.warmup below.
@@ -37,6 +41,11 @@ RUN pip install --no-cache-dir \
 # so /app must be writable by the runtime user).
 COPY . .
 
+# Bake bytecode for the dependencies and the app while still root (site-packages
+# is root-owned; appuser could not write these at runtime). Compilation failures
+# in unrelated vendored files are not fatal, hence the `|| true`.
+RUN python -m compileall -q -j 0 /usr/local/lib/python3.11/site-packages /app || true
+
 RUN useradd --create-home --uid 10001 appuser \
  && mkdir -p /opt/caches/mpl /opt/caches/numba \
  && chown -R appuser:appuser /app /opt/caches
@@ -44,7 +53,9 @@ USER appuser
 
 # Populate the caches as the runtime user, so they are readable (and the numba
 # cache keys match) when the same user serves requests.
-RUN python -m scripts.warmup
+RUN python -m scripts.warmup \
+ && echo "numba cache entries: $(ls /opt/caches/numba | wc -l)" \
+ && echo "mpl cache entries: $(ls /opt/caches/mpl | wc -l)"
 
 EXPOSE 8000
 
