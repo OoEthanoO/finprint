@@ -10,8 +10,10 @@ GET  /api/health    -> readiness + whether a trained model is loaded
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
@@ -31,8 +33,36 @@ logging.basicConfig(
 
 from finprint import config as C  # noqa: E402
 from finprint.predict import predict  # noqa: E402
+from finprint.warmup import run as warm_up  # noqa: E402
 
-app = FastAPI(title="finprint", description="Marine-mammal call classifier")
+log = logging.getLogger("finprint.app")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Warm the process before the port opens.
+
+    uvicorn runs this to completion *before* it binds the socket, so the
+    container is not reportable as ready until the first (expensive) prediction
+    path has been exercised. On Cloud Run that matters twice over: startup CPU
+    boost is still active here but not during an ordinary request, and an
+    instance started ahead of traffic absorbs the cost entirely.
+
+    Set FINPRINT_WARMUP=0 to skip it -- worth doing with `--reload`, where the
+    cost would be paid on every code change.
+    """
+    if os.environ.get("FINPRINT_WARMUP", "1") != "0":
+        warm_up()
+    else:
+        log.info("warm-up skipped (FINPRINT_WARMUP=0)")
+    yield
+
+
+app = FastAPI(
+    title="finprint",
+    description="Marine-mammal call classifier",
+    lifespan=lifespan,
+)
 
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

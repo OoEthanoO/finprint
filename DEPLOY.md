@@ -78,14 +78,32 @@ docker run -p 8000:8000 finprint
   acoustic features, and the spectrogram, with `model_available: false`. To
   refresh it, retrain (`python -m scripts.prepare_data && python -m
   finprint.train`) and commit the new file.
-- **Cold starts.** The service scales to zero, so the first request after an idle
-  period boots a container. `scripts/warmup.py` runs at image build time and
-  bakes the matplotlib font cache and numba's JIT artifacts into `/opt/caches`
-  (`MPLCONFIGDIR` / `NUMBA_CACHE_DIR`); without it a cold instance rebuilt both
-  *inside* the first request. Startup CPU boost is enabled on the service. What
-  remains on a cold start — Python imports of torch/librosa and the checkpoint
-  load — is per-process and unavoidable short of paying for a warm instance
-  (`--min-instances 1`).
+- **Cold starts (~50 s, and why).** The service scales to zero. A fresh *process*
+  spends ~50 s before it can answer, which `predict`'s stage timings attribute as:
+
+  ```
+  cold:  decode 33.0s  features 15.4s  species 1.6s  spectrogram 1.8s
+  warm:  decode  0.001s features  2.0s species 0.1s  spectrogram 0.3s
+  ```
+
+  `decode` dropping to a millisecond when warm shows it is not decoding at all:
+  it is librosa materialising its lazily-imported submodules, and numba
+  JIT-compiling the pitch kernels, on first use. Two mitigations are in place:
+
+  * `compileall` in the Dockerfile bakes `.pyc` for the dependencies (and
+    `PYTHONDONTWRITEBYTECODE` is deliberately *not* set). This more than halved
+    warm requests, 5.4 s → 2.4 s.
+  * `finprint.warmup` runs from the app's lifespan hook. uvicorn completes it
+    before binding the port, so an instance never reports ready until it can
+    actually predict — instances started ahead of traffic (deploy rollouts,
+    autoscaling) serve their first request warm.
+
+  What did *not* work, so it is not retried: baking numba's on-disk cache yields
+  only 3 entries (most librosa kernels are not cacheable), and the work is not
+  CPU-bound — `--cpu 2` measured 56.5 s against 52.1 s at `--cpu 1`. The
+  remaining cost is serial, per-process import/JIT time. Removing it means
+  either paying for a warm instance (`--min-instances 1`, ~$10–12/month) or
+  dropping librosa for direct `soundfile` + numpy/scipy DSP.
 - **Memory.** torch + librosa need ~1–2 GB resident; both configs above provision
   2 GB. Dropping below that risks OOM on model/library load.
 - **CPU-only.** The image installs CPU torch wheels; inference runs on CPU.
