@@ -9,6 +9,7 @@ GET  /api/health    -> readiness + whether a trained model is loaded
 
 from __future__ import annotations
 
+import logging
 import sys
 import tempfile
 from pathlib import Path
@@ -18,6 +19,15 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# uvicorn only configures its own loggers, leaving the root logger at WARNING —
+# so finprint's INFO records (the per-stage prediction timings) would be dropped.
+# Cloud Run collects stdout, so a plain stream handler is all that's needed.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s %(name)s %(message)s",
+    stream=sys.stdout,
+)
 
 from finprint import config as C  # noqa: E402
 from finprint.predict import predict  # noqa: E402
