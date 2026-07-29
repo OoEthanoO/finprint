@@ -119,6 +119,16 @@
 <footer>finprint · trained on the Watkins Marine Mammal Sound Database · academic use only</footer>
 
 <script>
+// ── API location ────────────────────────────────────────────────────────
+// The backend (FastAPI + model) runs on a Hugging Face Space. When this page
+// is served by the Space itself (or locally) we call it same-origin; when it's
+// served from anywhere else (your Vercel domain) we call the Space directly.
+// After you create the Space, set SPACE_URL to its URL:
+const SPACE_URL = "https://YOUR-USERNAME-finprint.hf.space"; // <-- edit me
+const _sameOrigin = location.hostname.endsWith(".hf.space")
+  || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+const API_BASE = _sameOrigin ? "" : SPACE_URL;
+
 const $ = s => document.querySelector(s);
 const drop = $("#drop"), fileInput = $("#file"), status = $("#status"),
       results = $("#results"), player = $("#player");
@@ -167,7 +177,7 @@ async function send(file) {
   status.textContent = "Analyzing " + file.name + " …";
   const fd = new FormData(); fd.append("file", file);
   try {
-    const r = await fetch("/api/predict", { method: "POST", body: fd });
+    const r = await fetch(API_BASE + "/api/predict", { method: "POST", body: fd });
     if (!r.ok) { status.textContent = "Error: " + (await r.text()); return; }
     render(await r.json()); status.textContent = "";
   } catch (err) { status.textContent = "Request failed: " + err.message; }

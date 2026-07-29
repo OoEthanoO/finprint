@@ -1,0 +1,13 @@
+# Runtime (inference/serving) deps only — training-only libs (datasets,
+# huggingface_hub, pandas, tqdm, scikit-learn) are intentionally excluded to
+# keep the container small. torch/torchaudio are installed from the CPU index
+# in the Dockerfile.
+numpy>=1.26
+scipy>=1.11
+librosa>=0.10
+soundfile>=0.12
+soxr>=0.3
+matplotlib>=3.8
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9

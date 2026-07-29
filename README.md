@@ -1,3 +1,4 @@
+<!-- The block below is Hugging Face Space metadata; it is ignored by GitHub. -->
 ---
 title: finprint
 emoji: 🐋
@@ -115,6 +116,33 @@ pytest tests/
 Covers the windowing invariants, the FFT-autocorrelation equivalence (a guard
 against the O(N²) form that used to hang on long clips), the call-type rules, and
 the HTTP contract including the upload guard.
+
+---
+
+## Deploy
+
+The backend (FastAPI + PyTorch) can't run on static/edge hosts (Vercel,
+Cloudflare Pages) — no native libs, no ffmpeg, size/time limits. So we split it:
+
+**Backend → Hugging Face Space (Docker, free, 16 GB RAM).**
+```bash
+# needs a free HF account + write token: https://huggingface.co/settings/tokens
+HF_TOKEN=hf_xxx SPACE_ID=<username>/finprint python -m scripts.deploy_hf
+# live at https://huggingface.co/spaces/<username>/finprint
+# API URL:  https://<username>-finprint.hf.space
+```
+
+**Frontend → Vercel (free, your custom domain).** The page is fully static and
+already knows to call the Space cross-origin when it isn't served by the Space
+itself (see `SPACE_URL` in [app/static/index.html](app/static/index.html)).
+1. Set `SPACE_URL` in `app/static/index.html` to your Space's API URL.
+2. Deploy the `app/static` folder to Vercel (set the project's **Root Directory**
+   to `app/static`), then attach your domain in the Vercel dashboard.
+
+CORS is already enabled on the API (`*` by default; restrict with the
+`FINPRINT_ALLOW_ORIGINS` env var on the Space if you want to lock it to your
+domain). Visitors only ever see your Vercel domain; the `hf.space` API is
+called invisibly in the background.
 
 ---
 

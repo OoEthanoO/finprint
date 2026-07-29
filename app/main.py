@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -62,6 +63,17 @@ app = FastAPI(
     title="finprint",
     description="Marine-mammal call classifier",
     lifespan=lifespan,
+)
+
+# Allow a separately-hosted frontend (e.g. on Vercel) to call this API. This is
+# a public, read-only inference endpoint, so "*" is fine; restrict to your own
+# domain(s) via the FINPRINT_ALLOW_ORIGINS env var if you prefer.
+_origins = os.environ.get("FINPRINT_ALLOW_ORIGINS", "*").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _origins],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 STATIC = Path(__file__).resolve().parent / "static"

@@ -44,6 +44,23 @@ class AcousticFeatures:
         return asdict(self)
 
 
+def _trim_silence(wav: np.ndarray, top_db: float = 30.0) -> np.ndarray:
+    """Trim leading/trailing quiet below `top_db` under the peak.
+
+    A tiny numpy stand-in for librosa.effects.trim, which lazily imports
+    scikit-learn + pandas — heavy deps we otherwise wouldn't need at serve time.
+    """
+    amp = np.abs(wav)
+    peak = amp.max() if amp.size else 0.0
+    if peak < 1e-9:
+        return wav
+    thresh = peak * (10.0 ** (-top_db / 20.0))
+    idx = np.where(amp > thresh)[0]
+    if idx.size == 0:
+        return wav
+    return wav[idx[0]:idx[-1] + 1]
+
+
 def _energy_edges(mag: np.ndarray, freqs: np.ndarray) -> tuple[float, float]:
     """5th / 95th percentile of the cumulative energy across frequency."""
     spec = mag.mean(axis=1)
@@ -109,7 +126,7 @@ def extract(wav: np.ndarray, sr: int = C.SAMPLE_RATE) -> AcousticFeatures:
     wav = np.asarray(wav, dtype=np.float32).ravel()
     wav = wav - float(wav.mean())          # remove DC offset
     # trim silence so duration reflects the actual call
-    trimmed, _ = librosa.effects.trim(wav, top_db=30)
+    trimmed = _trim_silence(wav, top_db=30)
     if trimmed.size < sr * 0.01:
         trimmed = wav
     duration = len(trimmed) / sr
