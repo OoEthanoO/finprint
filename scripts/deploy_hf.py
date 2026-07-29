@@ -18,11 +18,15 @@ from huggingface_hub import HfApi
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Only these paths are pushed to the Space (keeps .venv/data/etc. out).
+# Only these paths are pushed to the Space (keeps .venv/, data/ etc. out).
+# This must cover everything the Dockerfile build needs: it installs from
+# requirements.txt and runs `python -m scripts.warmup`, so omitting either
+# breaks the Space build. README.md carries the Space metadata.
 ALLOW = [
     "finprint/**",
     "app/**",
     "models/**",
+    "scripts/**",
     "Dockerfile",
     "requirements-serve.txt",
     ".dockerignore",

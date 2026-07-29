@@ -120,14 +120,15 @@
 
 <script>
 // ── API location ────────────────────────────────────────────────────────
-// The backend (FastAPI + model) runs on a Hugging Face Space. When this page
-// is served by the Space itself (or locally) we call it same-origin; when it's
-// served from anywhere else (your Vercel domain) we call the Space directly.
-// After you create the Space, set SPACE_URL to its URL:
-const SPACE_URL = "https://YOUR-USERNAME-finprint.hf.space"; // <-- edit me
-const _sameOrigin = location.hostname.endsWith(".hf.space")
-  || location.hostname === "localhost" || location.hostname === "127.0.0.1";
-const API_BASE = _sameOrigin ? "" : SPACE_URL;
+// Same-origin by default. The page is normally served by the same FastAPI
+// process that answers /api/*, so this works on every host we deploy to —
+// Cloud Run behind a custom domain, a plain `uvicorn` on localhost, or a
+// Hugging Face Space — without knowing the hostname in advance.
+//
+// Only set this if the page is hosted separately from the backend (e.g. a
+// static frontend on Vercel calling the API elsewhere). Leave it empty
+// otherwise: a stale or placeholder value here breaks every request.
+const API_BASE = "".replace(/\/+$/, "");   // e.g. "https://api.example.com"
 
 const $ = s => document.querySelector(s);
 const drop = $("#drop"), fileInput = $("#file"), status = $("#status"),

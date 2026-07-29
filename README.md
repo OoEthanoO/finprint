@@ -121,28 +121,31 @@ the HTTP contract including the upload guard.
 
 ## Deploy
 
-The backend (FastAPI + PyTorch) can't run on static/edge hosts (Vercel,
-Cloudflare Pages) — no native libs, no ffmpeg, size/time limits. So we split it:
+**Live: <https://finprint.ethanyanxu.com>** — one container on Google Cloud Run,
+serving both the API and this page. [**DEPLOY.md**](DEPLOY.md) is the canonical
+guide (deploy command, the Fly.io and Render configs kept in-repo, and how to run
+the exact image locally).
 
-**Backend → Hugging Face Space (Docker, free, 16 GB RAM).**
+The whole app is one image: FastAPI serves `/api/*` and the static page together,
+so the frontend is same-origin wherever it runs — Cloud Run behind a custom
+domain, a local `uvicorn`, or a container host. Static/edge platforms (Vercel,
+Cloudflare Pages) can't host the *backend* — it needs native libs, ffmpeg, and
+more than an edge runtime allows — but they can host the page on its own if you
+ever want to split them:
+
+- Set `API_BASE` in [app/static/index.html](app/static/index.html) to the backend
+  URL and deploy `app/static` as a static site. Leave it empty for the normal
+  single-container setup.
+- CORS is already enabled on the API — `*` by default, restrict it with the
+  `FINPRINT_ALLOW_ORIGINS` env var.
+
+**Hugging Face Spaces** works too, as an alternative host for the same image (the
+Space metadata at the top of this file configures it):
+
 ```bash
 # needs a free HF account + write token: https://huggingface.co/settings/tokens
 HF_TOKEN=hf_xxx SPACE_ID=<username>/finprint python -m scripts.deploy_hf
-# live at https://huggingface.co/spaces/<username>/finprint
-# API URL:  https://<username>-finprint.hf.space
 ```
-
-**Frontend → Vercel (free, your custom domain).** The page is fully static and
-already knows to call the Space cross-origin when it isn't served by the Space
-itself (see `SPACE_URL` in [app/static/index.html](app/static/index.html)).
-1. Set `SPACE_URL` in `app/static/index.html` to your Space's API URL.
-2. Deploy the `app/static` folder to Vercel (set the project's **Root Directory**
-   to `app/static`), then attach your domain in the Vercel dashboard.
-
-CORS is already enabled on the API (`*` by default; restrict with the
-`FINPRINT_ALLOW_ORIGINS` env var on the Space if you want to lock it to your
-domain). Visitors only ever see your Vercel domain; the `hf.space` API is
-called invisibly in the background.
 
 ---
 

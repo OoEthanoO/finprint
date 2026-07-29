@@ -32,10 +32,16 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Dependencies first so the layer caches across code changes.
-COPY requirements.txt .
+#
+# Serving deps only: the training/data-prep stack (datasets -> pyarrow + pandas,
+# huggingface_hub, tqdm) is never imported by the API, and pulling it in costs
+# ~200 MB of image that every cold start has to fetch. requirements.txt remains
+# the full development superset; CI installs this same file, so a serving import
+# missing from it fails there rather than in production.
+COPY requirements-serve.txt .
 RUN pip install --no-cache-dir \
         --index-url https://download.pytorch.org/whl/cpu torch torchaudio \
- && pip install --no-cache-dir -r requirements.txt
+ && pip install --no-cache-dir -r requirements-serve.txt
 
 # App code (config.py creates data/ models/ reports/ under /app at import,
 # so /app must be writable by the runtime user).

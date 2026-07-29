@@ -21,7 +21,9 @@ jobs:
           python -m pip install --upgrade pip
           # CPU torch wheels, same as the Dockerfile — avoids pulling ~5 GB of CUDA.
           pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
-          pip install -r requirements.txt pytest httpx
+          # The serving set the image actually ships, so a serving import missing
+          # from requirements-serve.txt fails here rather than in production.
+          pip install -r requirements-serve.txt pytest httpx
 
       - name: Run tests
         run: pytest tests/ -q

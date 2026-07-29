@@ -1,7 +1,13 @@
-# Runtime (inference/serving) deps only — training-only libs (datasets,
-# huggingface_hub, pandas, tqdm, scikit-learn) are intentionally excluded to
-# keep the container small. torch/torchaudio are installed from the CPU index
-# in the Dockerfile.
+# Runtime dependencies — this is what the container image installs.
+#
+# Deliberately excludes the training / data-prep stack (datasets, which drags in
+# pyarrow + pandas, plus huggingface_hub and tqdm): the API never imports it, and
+# it costs ~200 MB that every cold start has to pull. requirements.txt is the
+# full development superset; keep this file in step when a serving import is
+# added. scikit-learn is not listed because librosa depends on it directly.
+#
+# torch + torchaudio are installed separately from the CPU wheel index (see the
+# Dockerfile) to avoid pulling CUDA.
 numpy>=1.26
 scipy>=1.11
 librosa>=0.10
