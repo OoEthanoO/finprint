@@ -22,9 +22,14 @@ layer), all in a small web app.
 
 | Output | How | Trained? |
 |---|---|---|
-| **Species** (32 marine mammals) | CNN over log-mel spectrograms | ✅ yes, on the WMMS dataset |
+| **Group** (toothed whale / baleen whale / pinniped) | the top species' family, with its summed probability | ✅ derived from the CNN — **0.979** on held-out data |
+| **Species** (32 marine mammals) | CNN over log-mel spectrograms | ✅ yes, on the WMMS dataset — 0.906 |
 | **Call type** (click / burst-pulse / whistle / song-moan / broadband) | rules over measured acoustic features | ➖ signal analysis, not a trained model |
 | **Acoustic features** (dominant freq, bandwidth, f0 contour, pulse rate, …) | librosa DSP | ➖ direct measurement |
+
+The app leads with the **group** because the model's mistakes stay inside the
+family — it confuses one dolphin for another, not a dolphin for a seal. So the
+group is right ~98% of the time even when the species underneath it is wrong.
 
 We originally wanted to predict **behavioral context** (mating, hunting, …).
 After surveying the data, that isn't honestly possible: the Watkins database —
@@ -37,8 +42,9 @@ prediction ships with the numbers and the reason it was chosen.
 **Species is always one of the 32.** The CNN can only name a species it was
 trained on, so a clip from any other animal (a blue whale, say) still comes back
 as its nearest match. When the top score is below **0.5** — the point where
-held-out accuracy drops from ~95% to ~63% — the app labels the prediction
-*low confidence* instead of presenting it as certain.
+held-out accuracy falls from **0.97 to 0.49** — the app labels the prediction
+*low confidence* instead of presenting it as certain. (The group above it stays
+reliable even there, which is the other reason to show it.)
 
 ---
 
@@ -157,12 +163,19 @@ Held-out **WMMS test split** (340 clips, 32 species), from
 
 | Metric | Test |
 |---|---|
-| Accuracy | **0.788** |
-| Top-3 accuracy | **0.921** |
-| Macro-F1 | **0.798** |
+| Accuracy | **0.906** |
+| Top-3 accuracy | **0.965** |
+| Macro-F1 | **0.878** |
+| Group (toothed whale / baleen whale / pinniped) | **0.979** |
 
 Trained in ~2 min on an Apple-Silicon GPU (MPS), 60 epochs, best model chosen by
-validation macro-F1 (0.899).
+validation macro-F1 (0.957).
+
+Accuracy rose from 0.788 to 0.906 by filling short clips with a repeat of the
+clip instead of silence — the median clip is ~1.7 s against a 4 s input, so a
+typical example used to be ~60% padding. [reports/error_analysis.md](reports/error_analysis.md)
+has the variant comparison, the error breakdown, and one approach that was
+measured and rejected.
 
 ---
 

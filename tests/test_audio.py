@@ -34,14 +34,27 @@ def test_loudest_window_lands_on_the_loud_region():
     assert rms > 0.5                           # burst RMS ~0.64; quiet ~0.01
 
 
-def test_fix_length_pads_short_clip_centered_without_altering_content():
+def test_fix_length_tiles_short_clip_without_inventing_audio():
+    """Short clips are filled by repeating them, not padded with silence.
+
+    Zero padding left the median clip as mostly silence and cost ~10 points of
+    accuracy; tiling repeats the clip's own samples, so the window starts with
+    the original signal and contains no invented content.
+    """
     w = tone(1000, 0.5)
     out = fix_length(w)
     assert out.shape[0] == C.N_SAMPLES
-    pad = C.N_SAMPLES - len(w)
-    left = pad // 2
-    np.testing.assert_array_equal(out[left:left + len(w)], w)
-    assert out[:left].sum() == 0.0 and out[left + len(w):].sum() == 0.0
+    # begins with the untouched clip
+    np.testing.assert_array_equal(out[:len(w)], w)
+    # every sample comes from the clip itself, and none of it is silence
+    assert np.isin(out, w).all()
+    assert np.abs(out).sum() > 0.0
+    # the repeat is periodic at the clip length
+    np.testing.assert_array_equal(out[len(w):2 * len(w)], w)
+
+
+def test_fix_length_handles_empty_input():
+    assert fix_length(np.array([], dtype=np.float32)).shape[0] == C.N_SAMPLES
 
 
 def test_fix_length_windows_long_clip():

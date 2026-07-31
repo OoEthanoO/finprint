@@ -61,6 +61,11 @@
     border-radius: 20px; font-weight: 700; color: var(--accent); }
   .rationale { color: var(--muted); font-size: 14px; margin-top: 10px; font-style: italic; }
 
+  /* broad taxonomic group — the reliable half of the answer, so it leads */
+  .grouprow { margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid #1a3452; }
+  .groupconf { color: var(--muted); font-variant-numeric: tabular-nums; margin-left: 8px; }
+  .grouphint { color: var(--muted); font-size: 12px; margin-top: 6px; line-height: 1.4; }
+
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   td { padding: 6px 4px; border-bottom: 1px solid #1a3452; }
   td.k { color: var(--muted); } td.v { text-align: right; font-variant-numeric: tabular-nums; }
@@ -94,6 +99,12 @@
     <div class="grid">
       <div class="card" id="speciesCard">
         <h2>Species</h2>
+        <div id="groupLine" class="grouprow hidden">
+          <span id="groupLabel" class="badge"></span>
+          <span id="groupConf" class="groupconf"></span>
+          <div class="grouphint">broad group — correct ~98% of the time on held-out data,
+            even when the species below is wrong</div>
+        </div>
         <div id="species"></div>
         <div id="lowConf" class="note hidden">Low confidence — this call may be from a species finprint wasn't trained on (it knows 32).</div>
         <div id="noModel" class="note hidden">No trained model loaded yet — run training to enable species prediction.</div>
@@ -204,11 +215,19 @@ function render(d) {
   results.classList.remove("hidden");
   // species
   const sc = $("#species"), nm = $("#noModel"), lc = $("#lowConf");
+  // Broad group first: it survives the species-level confusions (dolphins get
+  // mistaken for other dolphins), so it is the part worth leading with.
+  const gl = $("#groupLine");
+  if (d.group) {
+    $("#groupLabel").textContent = d.group.label;
+    $("#groupConf").textContent = (d.group.confidence * 100).toFixed(0) + "%";
+    gl.classList.remove("hidden");
+  } else { gl.classList.add("hidden"); }
   if (d.species) {
     nm.classList.add("hidden");
     // The model always names its closest of 32 species; a low top score means
     // the real answer may be outside that set (e.g. a blue whale it never saw).
-    // On the held-out test split, predictions >=0.5 are ~95% correct vs ~63%
+    // On the held-out test split, predictions >=0.5 are ~97% correct vs ~49%
     // below, so 0.5 is the honesty line between "trust this" and "maybe not".
     const low = d.species[0].confidence < 0.5;
     sc.innerHTML = d.species.map((s, i) =>

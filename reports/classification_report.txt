@@ -1,40 +1,40 @@
-accuracy 0.7882  top3 0.9206  macro-F1 0.7980
+accuracy 0.9059  top3 0.9647  macro-F1 0.8780
 
                                   precision    recall  f1-score   support
 
-        Atlantic_Spotted_Dolphin       0.79      0.92      0.85        12
+        Atlantic_Spotted_Dolphin       1.00      0.92      0.96        12
                     Bearded_Seal       0.62      0.71      0.67         7
-             Beluga,_White_Whale       0.78      0.70      0.74        10
-              Bottlenose_Dolphin       0.67      0.80      0.73         5
-                   Bowhead_Whale       1.00      0.67      0.80        12
-                 Clymene_Dolphin       0.64      0.54      0.58        13
-                  Common_Dolphin       0.67      0.60      0.63        10
-              False_Killer_Whale       1.00      0.83      0.91        12
+             Beluga,_White_Whale       0.70      0.70      0.70        10
+              Bottlenose_Dolphin       1.00      0.80      0.89         5
+                   Bowhead_Whale       0.83      0.83      0.83        12
+                 Clymene_Dolphin       1.00      0.77      0.87        13
+                  Common_Dolphin       1.00      0.80      0.89        10
+              False_Killer_Whale       0.92      1.00      0.96        12
               Fin,_Finback_Whale       1.00      1.00      1.00        10
-                 Frasers_Dolphin       0.88      0.78      0.82        18
-         Grampus,_Rissos_Dolphin       0.65      1.00      0.79        13
-                       Harp_Seal       0.69      1.00      0.82         9
+                 Frasers_Dolphin       0.95      1.00      0.97        18
+         Grampus,_Rissos_Dolphin       1.00      1.00      1.00        13
+                       Harp_Seal       0.75      1.00      0.86         9
                   Humpback_Whale       1.00      0.92      0.96        13
-                    Killer_Whale       1.00      0.86      0.92         7
+                    Killer_Whale       0.88      1.00      0.93         7
                     Leopard_Seal       1.00      1.00      1.00         2
-         Long-Finned_Pilot_Whale       0.85      0.79      0.81        14
-              Melon_Headed_Whale       0.69      0.69      0.69        13
+         Long-Finned_Pilot_Whale       0.81      0.93      0.87        14
+              Melon_Headed_Whale       0.92      0.92      0.92        13
                      Minke_Whale       1.00      1.00      1.00         3
-                         Narwhal       0.60      0.90      0.72        10
-            Northern_Right_Whale       0.83      0.91      0.87        11
-     Pantropical_Spotted_Dolphin       0.75      0.46      0.57        13
+                         Narwhal       0.91      1.00      0.95        10
+            Northern_Right_Whale       1.00      0.82      0.90        11
+     Pantropical_Spotted_Dolphin       0.92      0.92      0.92        13
                        Ross_Seal       1.00      0.90      0.95        10
-           Rough-Toothed_Dolphin       0.53      0.90      0.67        10
-Short-Finned_Pacific_Pilot_Whale       0.92      0.79      0.85        14
-            Southern_Right_Whale       0.56      1.00      0.71         5
-                     Sperm_Whale       0.77      0.67      0.71        15
-                 Spinner_Dolphin       0.75      0.78      0.77        23
-                 Striped_Dolphin       0.82      0.56      0.67        16
-                          Walrus       1.00      0.50      0.67         8
+           Rough-Toothed_Dolphin       1.00      1.00      1.00        10
+Short-Finned_Pacific_Pilot_Whale       1.00      0.93      0.96        14
+            Southern_Right_Whale       0.71      1.00      0.83         5
+                     Sperm_Whale       0.71      0.80      0.75        15
+                 Spinner_Dolphin       0.95      0.83      0.88        23
+                 Striped_Dolphin       0.89      1.00      0.94        16
+                          Walrus       1.00      0.62      0.77         8
                     Weddell_Seal       0.00      0.00      0.00         0
-            White-beaked_Dolphin       0.85      1.00      0.92        11
-             White-sided_Dolphin       1.00      0.91      0.95        11
+            White-beaked_Dolphin       1.00      1.00      1.00        11
+             White-sided_Dolphin       0.92      1.00      0.96        11
 
-                        accuracy                           0.79       340
-                       macro avg       0.79      0.78      0.77       340
-                    weighted avg       0.81      0.79      0.79       340
+                        accuracy                           0.91       340
+                       macro avg       0.89      0.88      0.88       340
+                    weighted avg       0.92      0.91      0.91       340

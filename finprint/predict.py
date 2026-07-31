@@ -26,6 +26,7 @@ from .audio import logmel
 from .calltype import classify
 from .features import extract
 from .model import SpeciesCNN
+from .taxonomy import group_of
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +49,8 @@ def _timed(stage: str, into: dict):
 @lru_cache(maxsize=1)
 def _load_model():
     if not C.CHECKPOINT.exists():
-        return None, None, None
+        # Same arity as the loaded case, so callers can unpack either result.
+        return None, None, None, None
     dev = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
     ckpt = torch.load(C.CHECKPOINT, map_location=dev)
     model = SpeciesCNN(ckpt["n_classes"]).to(dev)
@@ -59,18 +61,39 @@ def _load_model():
     return model, labels, norm, dev
 
 
+def _group_from(probs: np.ndarray, labels: dict, top_index: int) -> dict | None:
+    """Broad group for the top species, with that group's total probability.
+
+    Taken from the top species rather than from an independent argmax so the two
+    can never contradict each other on screen. The confidence is the summed mass
+    of every species in the group, i.e. the model's belief that it heard *this
+    kind* of animal — a claim that holds up far better than the species itself
+    (~0.98 vs ~0.79 on the test split).
+    """
+    label = group_of(labels[str(int(top_index))])
+    if label is None:
+        return None
+    mass = sum(
+        float(p) for i, p in enumerate(probs)
+        if group_of(labels[str(i)]) == label
+    )
+    return {"label": label, "confidence": round(mass, 4)}
+
+
 def _species_topk(wav: np.ndarray, k: int = 3):
+    """Top-k species and the broad group, or None when no model is loaded."""
     loaded = _load_model()
     if loaded[0] is None:
-        return None
+        return None, None
     model, labels, norm, dev = loaded
     mel = (logmel(wav) - norm["mean"]) / norm["std"]
     x = torch.from_numpy(mel).unsqueeze(0).unsqueeze(0).float().to(dev)
     with torch.no_grad():
         probs = torch.softmax(model(x), 1).cpu().numpy()[0]
     idx = np.argsort(probs)[::-1][:k]
-    return [{"species": labels[str(int(i))], "confidence": round(float(probs[i]), 4)}
+    topk = [{"species": labels[str(int(i))], "confidence": round(float(probs[i]), 4)}
             for i in idx]
+    return topk, _group_from(probs, labels, idx[0])
 
 
 def _spectrogram_png(wav: np.ndarray) -> str:
@@ -109,10 +132,11 @@ def predict(audio_path: str, with_spectrogram: bool = True) -> dict:
         feats = extract(wav)
     call = classify(feats)
     with _timed("species", timings):
-        species = _species_topk(wav)
+        species, group = _species_topk(wav)
 
     result = {
         "species": species,                          # None if no trained model yet
+        "group": group,                              # broad, far more reliable
         "call_type": {
             "label": call.label,
             "confidence": call.confidence,
