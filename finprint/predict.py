@@ -26,6 +26,7 @@ from .audio import logmel
 from .calltype import classify
 from .features import extract
 from .model import SpeciesCNN
+from .quality import assess
 from .taxonomy import group_of
 
 log = logging.getLogger(__name__)
@@ -134,9 +135,15 @@ def predict(audio_path: str, with_spectrogram: bool = True) -> dict:
     with _timed("species", timings):
         species, group = _species_topk(wav)
 
+    # A closed-set softmax names a species for silence too, and confidently, so
+    # the input is judged on its own terms. Species is still returned for
+    # completeness; consumers should treat it as unreliable when this is set.
+    warning = assess(wav, feats)
+
     result = {
         "species": species,                          # None if no trained model yet
         "group": group,                              # broad, far more reliable
+        "signal_warning": warning,                   # set when there is no call to identify
         "call_type": {
             "label": call.label,
             "confidence": call.confidence,

@@ -46,6 +46,14 @@ held-out accuracy falls from **0.97 to 0.49** — the app labels the prediction
 *low confidence* instead of presenting it as certain. (The group above it stays
 reliable even there, which is the other reason to show it.)
 
+**Silence and noise are rejected outright.** Confidence alone cannot catch them:
+a closed-set softmax is *more* certain on garbage than on a quiet real call —
+pure silence scores 0.72 and white noise 0.95, both above that 0.5 line. So
+[`finprint/quality.py`](finprint/quality.py) checks the audio itself and the app
+says there is nothing to identify instead of naming a whale. The thresholds are
+set from measurement, deliberately biased against false alarms on genuine
+broadband calls like echolocation click trains.
+
 ---
 
 ## Architecture

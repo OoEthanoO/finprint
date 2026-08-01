@@ -20,6 +20,7 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -104,7 +105,17 @@ async def limit_body_size(request: Request, call_next):
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    # Without this, browsers derive their own freshness window from
+    # Last-Modified and can keep serving a stale page well after a deploy — a
+    # returning visitor sees the old UI with no obvious way to know.
+    #
+    # `no-cache` means "revalidate before reusing". Starlette's FileResponse
+    # sets an ETag but implements no conditional handling (it never returns
+    # 304), so each revalidation re-sends the page rather than a bodiless 304.
+    # At ~13 KB that is a cheap price for a deploy always being visible.
+    return FileResponse(
+        STATIC / "index.html", headers={"Cache-Control": "no-cache"}
+    )
 
 
 @app.get("/api/health")
@@ -143,7 +154,13 @@ async def api_predict(file: UploadFile = File(...)):
         tmp.write(data)
         tmp.flush()
         try:
-            result = predict(tmp.name)
+            # predict() is ~0.7 s of blocking CPU work (mostly pitch tracking).
+            # Calling it directly from this coroutine parks the event loop for
+            # that whole time, and the loop is what serves everything else — a
+            # page load during a single upload measured 1.84 s instead of 1 ms.
+            # A worker thread keeps the loop free; the temp file stays alive
+            # because we await inside its `with` block.
+            result = await run_in_threadpool(predict, tmp.name)
         except Exception as exc:  # decode / inference failure
             raise HTTPException(422, f"could not process audio: {exc}") from exc
 

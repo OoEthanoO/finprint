@@ -61,6 +61,10 @@
     border-radius: 20px; font-weight: 700; color: var(--accent); }
   .rationale { color: var(--muted); font-size: 14px; margin-top: 10px; font-style: italic; }
 
+  /* nothing classifiable in the upload — say so instead of naming a species */
+  .signalwarn { background: rgba(240,160,90,.10); border: 1px solid #6b4a2b;
+    border-radius: 10px; padding: 12px 14px; color: var(--warn); font-size: 14px; }
+
   /* broad taxonomic group — the reliable half of the answer, so it leads */
   .grouprow { margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid #1a3452; }
   .groupconf { color: var(--muted); font-variant-numeric: tabular-nums; margin-left: 8px; }
@@ -99,6 +103,7 @@
     <div class="grid">
       <div class="card" id="speciesCard">
         <h2>Species</h2>
+        <div id="signalWarn" class="signalwarn hidden"></div>
         <div id="groupLine" class="grouprow hidden">
           <span id="groupLabel" class="badge"></span>
           <span id="groupConf" class="groupconf"></span>
@@ -111,9 +116,13 @@
       </div>
       <div class="card">
         <h2>Call type</h2>
-        <div><span id="callLabel" class="badge"></span> <span id="callConf" class="pct"></span></div>
-        <div id="callScores" style="margin-top:12px"></div>
-        <div id="callRationale" class="rationale"></div>
+        <div id="callBody">
+          <div><span id="callLabel" class="badge"></span> <span id="callConf" class="pct"></span></div>
+          <div id="callScores" style="margin-top:12px"></div>
+          <div id="callRationale" class="rationale"></div>
+        </div>
+        <div id="callNone" class="signalwarn hidden">No call to classify — the
+          call-type rules describe a sound's structure, and there is no sound here.</div>
       </div>
       <div class="card full">
         <h2>Spectrogram</h2>
@@ -215,15 +224,26 @@ function render(d) {
   results.classList.remove("hidden");
   // species
   const sc = $("#species"), nm = $("#noModel"), lc = $("#lowConf");
+  // Silence and noise still get a confident species out of a closed-set softmax,
+  // so when the backend says there is nothing to classify we show that instead
+  // of the guess rather than alongside it.
+  const sw = $("#signalWarn"), warned = !!d.signal_warning;
+  if (warned) {
+    sw.textContent = d.signal_warning.message;
+    sw.classList.remove("hidden");
+  } else { sw.classList.add("hidden"); }
+
   // Broad group first: it survives the species-level confusions (dolphins get
   // mistaken for other dolphins), so it is the part worth leading with.
   const gl = $("#groupLine");
-  if (d.group) {
+  if (d.group && !warned) {
     $("#groupLabel").textContent = d.group.label;
     $("#groupConf").textContent = (d.group.confidence * 100).toFixed(0) + "%";
     gl.classList.remove("hidden");
   } else { gl.classList.add("hidden"); }
-  if (d.species) {
+  if (warned) {
+    sc.innerHTML = ""; lc.classList.add("hidden"); nm.classList.add("hidden");
+  } else if (d.species) {
     nm.classList.add("hidden");
     // The model always names its closest of 32 species; a low top score means
     // the real answer may be outside that set (e.g. a blue whale it never saw).
@@ -235,7 +255,10 @@ function render(d) {
           s.confidence, i === 0)).join("");
     lc.classList.toggle("hidden", !low);
   } else { sc.innerHTML = ""; lc.classList.add("hidden"); nm.classList.remove("hidden"); }
-  // call type
+  // call type — the rules describe the structure of a sound, so with no usable
+  // sound they have nothing to say either; showing a 100% label would be noise.
+  $("#callBody").classList.toggle("hidden", warned);
+  $("#callNone").classList.toggle("hidden", !warned);
   $("#callLabel").textContent = d.call_type.label;
   $("#callConf").textContent = (d.call_type.confidence*100).toFixed(0) + "%";
   $("#callScores").innerHTML = Object.entries(d.call_type.scores)

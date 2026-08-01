@@ -117,6 +117,39 @@ No class with test clips scores 0 any more.
 - Class support is very uneven (2–91 training clips per species), which is why
   training uses inverse-frequency class weighting.
 
+## Out-of-distribution input: confidence does not save you
+
+A closed-set softmax returns its nearest match for anything, and it is *more*
+confident on degenerate input than on a genuine quiet call:
+
+| Input | Top species | Confidence | Group confidence |
+|---|---|---|---|
+| Pure silence | Fin,_Finback_Whale | **0.72** | 0.91 |
+| DC offset | Fin,_Finback_Whale | 0.62 | 0.71 |
+| White noise | Melon_Headed_Whale | **0.95** | 0.99 |
+| A real 800 Hz tone | Fin,_Finback_Whale | 0.24 | 0.46 |
+
+The app's 0.5 low-confidence line catches the *real* tone and misses all three
+degenerate inputs — the failure is that there is nothing to classify, not that
+the answer is uncertain. So the input is checked directly
+([`finprint/quality.py`](../finprint/quality.py)), using separations measured on
+the held-out split:
+
+| | spectral flatness | RMS (DC removed) |
+|---|---|---|
+| Real clips (n=40) | max 0.29 (p95 0.25) | min 5.6e-03 |
+| White noise | 0.57 | 3.0e-01 |
+| Silence / DC | 1.00 / 0.99 | 0.0 / 6.0e-08 |
+
+Both gaps are wide. The noise threshold (0.45) sits closer to the noise end on
+purpose: wrongly flagging a real echolocation click train — broadband by nature,
+and the closest real calls get to noise at 0.29 — would look far more broken than
+missing a noise upload.
+
+A separate sweep of 24 awkward uploads (stereo, 8 kHz–192 kHz, 5 ms–60 s, mp3 /
+m4a / webm / flac / ogg, truncated and non-audio files) produced **no 5xx and no
+hangs**; malformed input is rejected with 4xx.
+
 ## Where request time actually goes
 
 Steady-state, CPU (what the container runs), a 2 s clip, spectrogram included:
@@ -143,6 +176,30 @@ Three optimisations were measured and **all three rejected**:
 
 The 6x speedup remains available if sub-second response ever matters more than
 call-type stability — it is a deliberate trade, not an oversight.
+
+### Concurrency: the event loop is GIL-bound, not CPU-bound
+
+`predict()` used to be called straight from the `async def` endpoint, parking the
+event loop — the thing that serves every other request — for its whole duration.
+A page load during a single upload took **1.84 s instead of 1 ms**. It now runs in
+a worker thread (`run_in_threadpool`), which helps but does not cure it:
+
+| | page load |
+|---|---|
+| Idle | 0.001 s |
+| During 1 upload | 0.51 s |
+| During 3 uploads, before the change | 1.84 s |
+| During 3 uploads, after | 1.20 s |
+
+The residual starvation is **not** a shortage of cores: these numbers come from a
+10-core machine, so a second core would have absorbed it if the work were merely
+CPU-bound. It is the GIL — librosa's pitch tracking holds it — which means
+**raising Cloud Run's `--cpu` would not fix this**. The levers that would are
+cutting the DSP work itself (the pyin trade above) or running more than one
+worker process.
+
+At ~0.5 s a page load during an upload is acceptable for a demo, so this is
+recorded rather than chased.
 
 ## Tried and rejected: multi-window inference
 
