@@ -72,6 +72,35 @@ def test_predict_413_on_oversize_via_middleware(monkeypatch):
     assert r.status_code == 413
 
 
+@pytest.mark.parametrize("ext", [".mp4", ".aac", ".opus", ".m4a", ".webm"])
+def test_container_formats_get_past_the_extension_gate(ext):
+    """These decode fine via ffmpeg, so they must not be refused by name.
+
+    Sent as garbage bytes on purpose: a 422 proves the request reached the
+    decoder (and failed there), while a 400 would mean the extension gate turned
+    it away. That keeps the test honest without needing ffmpeg installed.
+    """
+    r = client.post("/api/predict", files={"file": (f"clip{ext}", b"not audio" * 50)})
+    assert r.status_code == 422, f"{ext} was rejected by name, not by content"
+
+
+def test_unknown_extension_is_still_refused():
+    r = client.post("/api/predict", files={"file": ("clip.txt", b"nope")})
+    assert r.status_code == 400
+
+
+def test_mislabelled_extension_still_decodes():
+    """Safari's recorder emits MP4/AAC while the page names the blob .webm.
+
+    Nothing reads the extension to pick a decoder — content is sniffed — so the
+    mismatch has to keep working, or the Record button breaks on Safari.
+    """
+    r = client.post("/api/predict",
+                    files={"file": ("recording.webm", _wav_bytes(), "audio/webm")})
+    assert r.status_code == 200
+    assert r.json()["call_type"]["label"]
+
+
 def test_read_capped_allows_within_limit():
     assert asyncio.run(_read_capped(_upload(b"x" * 50), 100)) == b"x" * 50
 

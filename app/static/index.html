@@ -88,12 +88,16 @@
 <main>
   <div id="drop" class="drop">
     <p style="font-size:17px;color:var(--ink)">Drop an audio clip here</p>
-    <p>wav · flac · mp3 · m4a · ogg — or use the buttons below</p>
+    <p>wav · flac · mp3 · m4a · mp4 · ogg · webm — or use the buttons below</p>
     <div class="row">
       <button id="pick">Choose file</button>
       <button id="rec" class="ghost">● Record</button>
     </div>
-    <input id="file" type="file" accept="audio/*" class="hidden" />
+    <!-- `audio/*` alone greys out .mp4 in the picker, even though the server
+         accepts it and pulls the audio track out. The explicit extensions
+         cover the container formats that are reported as video. -->
+    <input id="file" type="file" class="hidden"
+           accept="audio/*,video/mp4,.mp4,.m4a,.aac,.opus,.webm" />
   </div>
 
   <audio id="player" class="hidden" controls></audio>

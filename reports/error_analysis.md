@@ -150,6 +150,61 @@ A separate sweep of 24 awkward uploads (stereo, 8 kHz–192 kHz, 5 ms–60 s, mp
 m4a / webm / flac / ogg, truncated and non-audio files) produced **no 5xx and no
 hangs**; malformed input is rejected with 4xx.
 
+## Degraded audio: what survives, and what to avoid at a demo
+
+Everything the model has seen is a clean Watkins archive recording. A live demo
+often is not — a compressed download, or a call played through a laptop speaker
+and captured on a phone. Measured on 90 held-out clips:
+
+| Condition | Species | Group | Mean confidence |
+|---|---|---|---|
+| Clean (baseline) | 0.922 | 0.989 | 0.78 |
+| mp3 64 kbps | 0.889 | 0.989 | 0.69 |
+| mp3 32 kbps | 0.644 | 0.878 | 0.40 |
+| Band-limited 300 Hz–8 kHz | 0.589 | 0.956 | 0.44 |
+| Noise at 20 dB SNR | 0.689 | 0.833 | 0.51 |
+| Noise at 10 dB SNR | 0.444 | 0.767 | 0.42 |
+| Noise at 0 dB SNR | 0.122 | 0.767 | 0.42 |
+| Speaker playback + phone capture (simulated) | **0.289** | 0.767 | 0.27 |
+
+Three things follow.
+
+**Compression is nearly free.** 64 kbps mp3 costs 3 points. Uploading a
+downloaded clip is fine; no need to hunt for lossless audio.
+
+**Re-recording through the air is not.** The speaker-playback simulation
+(band-limiting + reverb + 15 dB noise) drops species accuracy to 0.29. **Upload
+the file directly at a demo rather than playing it aloud and recording it.**
+
+**The group holds when the species does not.** It stays at 0.767 in the worst
+condition where species collapses to 0.289 — the same property that makes it
+worth leading with, now confirmed under distribution shift.
+
+### The app mostly knows when it is struggling
+
+The 0.5 low-confidence line was fitted on clean audio, but it keeps working as
+conditions worsen — the share of flagged predictions rises with the damage, and
+what stays confident stays largely right:
+
+| Condition | % flagged low-confidence | Accuracy when confident |
+|---|---|---|
+| Clean | 10% | 0.963 |
+| mp3 64 kbps | 24% | 0.956 |
+| mp3 32 kbps | 70% | 0.926 |
+| Band-limited | 66% | 0.935 |
+| Noise 20 dB | 50% | 0.889 |
+| Speaker + phone | 91% | 0.600 |
+| **Noise 0 dB** | 68% | **0.172** |
+
+The one real failure mode is the last row: at 0 dB SNR — noise as loud as the
+call — the model is confidently wrong, and no mechanism catches it. The signal
+gate does not, deliberately: it fires on *pure* noise (white noise is flagged)
+but a real call buried in noise is still a real call, and its spectral flatness
+stays under the threshold. Tightening it enough to catch this would start
+flagging genuine echolocation click trains, which is the trade documented above.
+The honest statement is that finprint is unreliable at 0 dB SNR and says so only
+some of the time.
+
 ## Where request time actually goes
 
 Steady-state, CPU (what the container runs), a 2 s clip, spectrogram included:

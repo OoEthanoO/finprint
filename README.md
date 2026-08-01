@@ -203,6 +203,15 @@ finprint/
 ## Limitations & next steps
 
 - **No behavior labels** exist, so call type is acoustic structure, not context.
+- **Trained only on clean archive audio.** Compression is nearly free (64 kbps
+  mp3 costs 3 points), but re-recording through the air is not — playing a call
+  through a speaker and capturing it on a phone drops species accuracy to 0.29.
+  Upload files directly. The group label survives it far better (0.77), and the
+  app flags 91% of those predictions as low-confidence. Full table in
+  [reports/error_analysis.md](reports/error_analysis.md).
+- **Unreliable at 0 dB SNR** — noise as loud as the call. There the model is
+  confidently wrong and only sometimes flags itself; the silence/noise gate does
+  not catch it, because a buried call is still a call.
 - Resampling to 32 kHz discards ultrasonic click energy above 16 kHz.
 - Small dataset — a pretrained audio encoder (AST/PANNs) would likely lift
   accuracy; SpecAugment + class weighting already help.

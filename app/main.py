@@ -80,7 +80,17 @@ app.add_middleware(
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
-ALLOWED_SUFFIXES = {".wav", ".flac", ".ogg", ".mp3", ".m4a", ".webm", ".aiff", ".aif"}
+# Everything ffmpeg can hand to librosa. The gate is on the extension only —
+# content is sniffed at decode time, so a mislabelled file still works (Safari's
+# recorder emits MP4/AAC while the page names the blob .webm, and that decodes
+# identically). .mp4 is here because a phone recording or a downloaded clip is
+# often a video container; the audio track is extracted, and a file with no
+# audio track fails the decode with a clear 422 rather than being turned away
+# at the door.
+ALLOWED_SUFFIXES = {
+    ".wav", ".flac", ".ogg", ".mp3", ".m4a", ".webm", ".aiff", ".aif",
+    ".mp4", ".aac", ".opus",
+}
 
 
 @app.middleware("http")
