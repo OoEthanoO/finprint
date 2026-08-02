@@ -13,6 +13,28 @@ Held-out WMMS test split, 340 clips, 32 classes, evaluated with
 "Before" is the zero-padded input described below; "current" is the same
 architecture trained on tiled input. Nothing else changed.
 
+### In short
+
+- The single biggest win was an input fix, not a model change: short clips were
+  ~60% silence, and **filling them with a repeat of the clip was worth +11.8
+  points**.
+- Errors are taxonomically sensible — **78% stay inside the right family** — so
+  the coarse group label is right **0.979** of the time and leads the UI.
+- Confidence is honest on clean audio and stays honest as audio degrades, but a
+  closed-set softmax cannot recognise garbage, so **silence and noise are
+  rejected by inspecting the audio** instead.
+- Known limits: **re-recording through the air** drops species accuracy to 0.29,
+  and the model is **unreliable at 0 dB SNR**.
+
+Sections: [the input fix](#the-change-that-mattered-stop-padding-short-clips-with-silence) ·
+[error structure](#what-the-remaining-32-errors-look-like) ·
+[group label](#the-coarse-group-label-is-the-reliable-half-of-the-answer) ·
+[caveats](#data-caveats-worth-stating-up-front) ·
+[out-of-distribution](#out-of-distribution-input-confidence-does-not-save-you) ·
+[degraded audio](#degraded-audio-what-survives-and-what-to-avoid-at-a-demo) ·
+[performance](#where-request-time-actually-goes) ·
+[rejected ideas](#tried-and-rejected-multi-window-inference)
+
 ---
 
 ## The change that mattered: stop padding short clips with silence
