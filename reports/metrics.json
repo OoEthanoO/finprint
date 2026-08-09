@@ -2,5 +2,51 @@
   "accuracy": 0.9058823529411765,
   "top3_accuracy": 0.9647058823529412,
   "macro_f1": 0.8780259371712834,
-  "n_test": 340
+  "n_test": 340,
+  "group": {
+    "accuracy": 0.9794,
+    "n": 340,
+    "calibration": [
+      {
+        "confidence_range": [
+          0.0,
+          0.5
+        ],
+        "n": 4,
+        "accuracy": 0.25
+      },
+      {
+        "confidence_range": [
+          0.5,
+          0.8
+        ],
+        "n": 14,
+        "accuracy": 0.7857
+      },
+      {
+        "confidence_range": [
+          0.8,
+          0.95
+        ],
+        "n": 109,
+        "accuracy": 0.9908
+      },
+      {
+        "confidence_range": [
+          0.95,
+          1.0
+        ],
+        "n": 213,
+        "accuracy": 1.0
+      }
+    ]
+  },
+  "low_confidence": {
+    "threshold": 0.5,
+    "flagged_fraction": 0.1382,
+    "n_confident": 293,
+    "n_flagged": 47,
+    "accuracy_when_confident": 0.9727,
+    "accuracy_when_flagged": 0.4894
+  }
 }

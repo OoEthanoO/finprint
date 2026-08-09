@@ -57,6 +57,15 @@ N_FRAMES = N_SAMPLES // HOP_LENGTH + 1
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024      # reject the request above this (~25 MB)
 MAX_AUDIO_SECONDS = 600.0                # decode at most the first 10 minutes
 
+# --- confidence reporting ------------------------------------------------
+# Below this top-species probability the app labels a prediction "low
+# confidence" rather than presenting it as an answer. Measured, not chosen: on
+# the held-out split, predictions at or above this line are ~0.97 correct and
+# those below it ~0.49. It lives here because three places must agree on it —
+# `predict()` sets the flag, the UI renders it, and `finprint.evaluate`
+# re-measures the split behind it on every retrain.
+LOW_CONFIDENCE = 0.5
+
 # --- training ------------------------------------------------------------
 SEED = 1234
 BATCH_SIZE = 32

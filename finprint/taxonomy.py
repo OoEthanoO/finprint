@@ -1,6 +1,6 @@
 """Broad taxonomic grouping for the 32 WMMS species.
 
-Species-level accuracy is ~0.79, but 89% of the model's mistakes stay inside the
+Species-level accuracy is ~0.91, but 78% of the model's mistakes stay inside the
 correct family, so the coarse group is right ~0.98 of the time (see
 reports/error_analysis.md). Reporting the group alongside the species gives an
 answer that is usually right even when the species guess is not.
@@ -61,3 +61,19 @@ GROUPS: dict[str, str] = {
 def group_of(species: str) -> str | None:
     """Broad group for a species label, or None if it isn't one we know."""
     return GROUPS.get(species)
+
+
+def group_confidence(probs, names, group: str) -> float:
+    """Total probability mass the model puts on one group.
+
+    This is the number the app prints next to the group label, so it is defined
+    once here and used by both `finprint.predict` (which reports it) and
+    `finprint.evaluate` (which measures whether it is calibrated). Defining it
+    twice is how a reported confidence and its published calibration table
+    quietly stop describing the same quantity.
+
+    `probs` and `names` are parallel sequences over the model's output classes.
+    """
+    return float(sum(
+        float(p) for p, n in zip(probs, names) if group_of(n) == group
+    ))

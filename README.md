@@ -1,4 +1,3 @@
-<!-- The block below is Hugging Face Space metadata; it is ignored by GitHub. -->
 ---
 title: finprint
 emoji: 🐋
@@ -8,6 +7,12 @@ sdk: docker
 app_port: 8000
 pinned: false
 ---
+
+<!-- The YAML above is Hugging Face Space metadata, and it has to stay the very
+first thing in this file. GitHub and HF only treat a fenced block as frontmatter
+when nothing at all precedes it — put anything above it, even a comment like this
+one, and GitHub instead renders a horizontal rule and a heading made of the raw
+YAML, while HF stops seeing the Space config. -->
 
 # finprint 🐋
 
@@ -114,6 +119,13 @@ python -m finprint.evaluate
 uvicorn app.main:app --reload
 ```
 
+Optionally, measure what survives degraded audio — mp3, noise at a given SNR,
+and a simulated speaker-played-then-phone-recorded clip (`~reports/robustness.json`):
+
+```bash
+python -m scripts.robustness          # needs ffmpeg on PATH
+```
+
 The web app works without step 2 — you'll still get call type, features, and the
 spectrogram; species prediction simply stays disabled until a model is trained.
 
@@ -175,6 +187,13 @@ Held-out **WMMS test split** (340 clips, 32 species), from
 | Top-3 accuracy | **0.965** |
 | Macro-F1 | **0.878** |
 | Group (toothed whale / baleen whale / pinniped) | **0.979** |
+| Accuracy among predictions shown as answers (top score ≥ 0.5) | **0.973** |
+
+The last two rows are what the UI actually puts in front of a user, so
+`finprint.evaluate` computes them alongside species accuracy and writes all of it
+to [reports/metrics.json](reports/metrics.json) — including the group-confidence
+calibration table. Nothing quoted here is measured by hand, so a retrain cannot
+leave these numbers describing an older model.
 
 Trained in ~2 min on an Apple-Silicon GPU (MPS), 60 epochs, best model chosen by
 validation macro-F1 (0.957).
@@ -194,7 +213,7 @@ finprint/
 ├── finprint/          core package (audio, model, features, calltype, train, evaluate, predict)
 ├── app/               FastAPI backend + single-page UI
 ├── tests/             pytest suite (DSP, call type, API)
-├── scripts/           prepare_data.py
+├── scripts/           prepare_data.py, robustness.py
 ├── data/              downloaded dataset + cached spectrograms  (gitignored)
 ├── models/            trained checkpoint (committed, ~2.3 MB) + label/norm JSON
 └── reports/           metrics + confusion matrix
@@ -203,15 +222,17 @@ finprint/
 ## Limitations & next steps
 
 - **No behavior labels** exist, so call type is acoustic structure, not context.
-- **Trained only on clean archive audio.** Compression is nearly free (64 kbps
-  mp3 costs 3 points), but re-recording through the air is not — playing a call
-  through a speaker and capturing it on a phone drops species accuracy to 0.29.
-  Upload files directly. The group label survives it far better (0.77), and the
-  app flags 91% of those predictions as low-confidence. Full table in
-  [reports/error_analysis.md](reports/error_analysis.md).
-- **Unreliable at 0 dB SNR** — noise as loud as the call. There the model is
-  confidently wrong and only sometimes flags itself; the silence/noise gate does
-  not catch it, because a buried call is still a call.
+- **Trained only on clean archive audio.** Compression is free (64 kbps mp3 costs
+  nothing measurable), but re-recording through the air is not — playing a call
+  through a speaker and capturing it on a phone drops species accuracy to 0.14.
+  Upload files directly. The group label survives it far better (0.74), and the
+  app declines to answer at all on 99% of those clips, which is the right
+  behaviour. Regenerate the full table with `python -m scripts.robustness`; it is
+  reproduced in [reports/error_analysis.md](reports/error_analysis.md).
+- **Unreliable at 0 dB SNR** — noise as loud as the call. This is the worst case,
+  not the speaker one: the app still presents ~22% of those clips as answers and
+  is right on 30% of them, so it is confidently wrong often enough to matter. The
+  silence/noise gate does not catch it, because a buried call is still a call.
 - Resampling to 32 kHz discards ultrasonic click energy above 16 kHz.
 - Small dataset — a pretrained audio encoder (AST/PANNs) would likely lift
   accuracy; SpecAugment + class weighting already help.

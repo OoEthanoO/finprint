@@ -80,6 +80,31 @@ def test_group_never_contradicts_the_top_species(tmp_path):
     assert 0.0 <= out["group"]["confidence"] <= 1.0
 
 
+def test_low_confidence_flag_matches_the_measured_line(tmp_path):
+    """The UI renders this flag verbatim, so it must be the threshold decision
+    and not something the page has to re-derive from the top score."""
+    import pytest
+
+    if not C.CHECKPOINT.exists():
+        pytest.skip("no trained checkpoint in this checkout")
+    P._load_model.cache_clear()
+    out = P.predict(_clip(tmp_path), with_spectrogram=False)
+    assert out["low_confidence"] is (
+        out["species"][0]["confidence"] < C.LOW_CONFIDENCE
+    )
+
+
+def test_low_confidence_is_none_without_a_checkpoint(monkeypatch, tmp_path):
+    """No species means no claim to qualify — not a claim of high confidence."""
+    monkeypatch.setattr(C, "CHECKPOINT", tmp_path / "absent.pt")
+    P._load_model.cache_clear()
+    try:
+        out = P.predict(_clip(tmp_path), with_spectrogram=False)
+    finally:
+        P._load_model.cache_clear()
+    assert out["low_confidence"] is None
+
+
 def test_group_absent_without_a_checkpoint(monkeypatch, tmp_path):
     monkeypatch.setattr(C, "CHECKPOINT", tmp_path / "absent.pt")
     P._load_model.cache_clear()

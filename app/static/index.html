@@ -251,9 +251,10 @@ function render(d) {
     nm.classList.add("hidden");
     // The model always names its closest of 32 species; a low top score means
     // the real answer may be outside that set (e.g. a blue whale it never saw).
-    // On the held-out test split, predictions >=0.5 are ~97% correct vs ~49%
-    // below, so 0.5 is the honesty line between "trust this" and "maybe not".
-    const low = d.species[0].confidence < 0.5;
+    // The backend decides where that line falls (finprint/config.py measures it:
+    // above it predictions are ~97% correct, below it ~49%) so the page and the
+    // evaluation report can never disagree about which answers are trustworthy.
+    const low = !!d.low_confidence;
     sc.innerHTML = d.species.map((s, i) =>
       bar(s.species, i === 0 ? (low ? "low confidence" : "top match") : "",
           s.confidence, i === 0)).join("");

@@ -27,7 +27,7 @@ from .calltype import classify
 from .features import extract
 from .model import SpeciesCNN
 from .quality import assess
-from .taxonomy import group_of
+from .taxonomy import group_confidence, group_of
 
 log = logging.getLogger(__name__)
 
@@ -69,15 +69,13 @@ def _group_from(probs: np.ndarray, labels: dict, top_index: int) -> dict | None:
     can never contradict each other on screen. The confidence is the summed mass
     of every species in the group, i.e. the model's belief that it heard *this
     kind* of animal — a claim that holds up far better than the species itself
-    (~0.98 vs ~0.79 on the test split).
+    (~0.98 vs ~0.91 on the test split).
     """
     label = group_of(labels[str(int(top_index))])
     if label is None:
         return None
-    mass = sum(
-        float(p) for i, p in enumerate(probs)
-        if group_of(labels[str(i)]) == label
-    )
+    names = [labels[str(i)] for i in range(len(probs))]
+    mass = group_confidence(probs, names, label)
     return {"label": label, "confidence": round(mass, 4)}
 
 
@@ -140,9 +138,19 @@ def predict(audio_path: str, with_spectrogram: bool = True) -> dict:
     # completeness; consumers should treat it as unreliable when this is set.
     warning = assess(wav, feats)
 
+    # Whether the top species is trustworthy is a calibration question, decided
+    # against a measured threshold — so it is answered here, next to the
+    # constant and alongside `signal_warning`, rather than by re-deriving the
+    # line in the UI where it would drift away from what evaluate.py reports.
+    low_confidence = (
+        None if species is None
+        else species[0]["confidence"] < C.LOW_CONFIDENCE
+    )
+
     result = {
         "species": species,                          # None if no trained model yet
         "group": group,                              # broad, far more reliable
+        "low_confidence": low_confidence,            # top species below the measured line
         "signal_warning": warning,                   # set when there is no call to identify
         "call_type": {
             "label": call.label,
