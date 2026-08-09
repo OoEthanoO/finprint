@@ -6,6 +6,7 @@ on lives here, so training and serving can never drift out of sync.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # --- paths ---------------------------------------------------------------
@@ -74,6 +75,17 @@ LR = 3e-4
 WEIGHT_DECAY = 1e-4
 VAL_FRACTION = 0.15          # carved out of the train split for early stopping
 EARLY_STOP_PATIENCE = 12
+
+# --- build identity ------------------------------------------------------
+# Which commit is actually serving. Set at deploy time, because the running
+# image cannot work this out for itself: `.gcloudignore` strips `.git` from the
+# build context, so there is no repository inside the container to ask.
+#
+#   gcloud run deploy ... --update-env-vars FINPRINT_GIT_SHA=$(git rev-parse HEAD)
+#
+# "unknown" is the honest answer for a local run or a deploy that forgot the
+# flag — never a stale value, which would be worse than no value at all.
+GIT_SHA = os.environ.get("FINPRINT_GIT_SHA", "unknown")
 
 # --- artifacts -----------------------------------------------------------
 CHECKPOINT = MODELS_DIR / "species_cnn.pt"

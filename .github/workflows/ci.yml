@@ -69,21 +69,28 @@ jobs:
             --project study-autopilot \
             --memory 2Gi --cpu 1 \
             --allow-unauthenticated \
+            --update-env-vars "FINPRINT_GIT_SHA=${{ github.sha }}" \
             --quiet
 
       # A deploy that "succeeded" but serves a broken container should fail the
       # build rather than sit green. The app's lifespan hook completes warm-up
       # before the port opens, so a ready revision can genuinely answer.
+      #
+      # Checks the reported commit, not just that something answers: traffic
+      # still pinned to an older revision would pass a plain health check while
+      # serving the previous build.
       - name: Verify the new revision is serving
         run: |
           url=$(gcloud run services describe finprint \
             --region us-central1 --project study-autopilot \
             --format='value(status.url)')
-          echo "checking $url/api/health"
+          echo "checking $url/api/health for ${{ github.sha }}"
           for i in $(seq 1 10); do
-            if curl -fsS --max-time 60 "$url/api/health" | tee /dev/stderr | grep -q '"status":"ok"'; then
-              echo "healthy"; exit 0
+            body=$(curl -fsS --max-time 60 "$url/api/health" || true)
+            echo "  $body"
+            if [ "$(printf '%s' "$body" | jq -r '.version // empty')" = "${{ github.sha }}" ]; then
+              echo "serving ${{ github.sha }}"; exit 0
             fi
-            echo "attempt $i failed; retrying in 15s"; sleep 15
+            echo "attempt $i: not the new build yet; retrying in 15s"; sleep 15
           done
-          echo "service did not become healthy"; exit 1
+          echo "service never reported ${{ github.sha }}"; exit 1

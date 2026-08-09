@@ -140,7 +140,7 @@
   </section>
 </main>
 
-<footer>finprint · trained on the Watkins Marine Mammal Sound Database · academic use only</footer>
+<footer>finprint · trained on the Watkins Marine Mammal Sound Database · academic use only<span id="version"></span></footer>
 
 <script>
 // ── API location ────────────────────────────────────────────────────────
@@ -161,7 +161,16 @@ const drop = $("#drop"), fileInput = $("#file"), status = $("#status"),
 // Server-authoritative limits; fetched so the client can reject an oversized
 // file with a friendly message before uploading. The server enforces them too.
 let limits = { max_upload_bytes: 25 * 1024 * 1024 };
-fetch("/api/health").then(r => r.json()).then(h => { limits = h; }).catch(() => {});
+// API_BASE, not a bare path: with the frontend hosted separately this has to
+// reach the API, not the static host — same as the /api/predict call below.
+fetch(API_BASE + "/api/health").then(r => r.json()).then(h => {
+  limits = h;
+  // Which commit is serving, so "is the site actually updated?" is answerable
+  // from the page itself. Absent on a local run, where it would be noise.
+  if (h.version && h.version !== "unknown") {
+    $("#version").textContent = " · build " + h.version.slice(0, 7);
+  }
+}).catch(() => {});
 
 $("#pick").onclick = () => fileInput.click();
 fileInput.onchange = e => { if (e.target.files[0]) send(e.target.files[0]); };

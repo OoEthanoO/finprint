@@ -132,6 +132,7 @@ def index():
 def health():
     return {
         "status": "ok",
+        "version": C.GIT_SHA,          # which commit is serving; see config.GIT_SHA
         "model_available": C.CHECKPOINT.exists(),
         "max_upload_bytes": C.MAX_UPLOAD_BYTES,
         "max_audio_seconds": C.MAX_AUDIO_SECONDS,

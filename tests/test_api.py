@@ -45,6 +45,32 @@ def test_health_reports_status_and_limits():
     assert j["max_audio_seconds"] == C.MAX_AUDIO_SECONDS
 
 
+def test_health_reports_the_serving_commit():
+    """The deploy pipeline gates on this field, and the page prints it, so the
+    key has to exist even when nothing set it."""
+    j = client.get("/api/health").json()
+    assert j["version"] == C.GIT_SHA
+    assert isinstance(j["version"], str) and j["version"]
+
+
+def test_version_falls_back_to_unknown_rather_than_a_stale_value(monkeypatch):
+    """A deploy that forgets the env var must say so, not report someone else's
+    commit — a wrong SHA is worse than no SHA, because it would be believed."""
+    import importlib
+
+    monkeypatch.delenv("FINPRINT_GIT_SHA", raising=False)
+    reloaded = importlib.reload(C)
+    try:
+        assert reloaded.GIT_SHA == "unknown"
+
+        monkeypatch.setenv("FINPRINT_GIT_SHA", "abc1234def")
+        assert importlib.reload(C).GIT_SHA == "abc1234def"
+    finally:
+        # Leave the module as the rest of the suite expects to find it.
+        monkeypatch.delenv("FINPRINT_GIT_SHA", raising=False)
+        importlib.reload(C)
+
+
 def test_predict_rejects_unsupported_type():
     r = client.post("/api/predict", files={"file": ("x.txt", b"hello", "text/plain")})
     assert r.status_code == 400

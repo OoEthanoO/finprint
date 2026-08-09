@@ -17,10 +17,30 @@ always-free quota. Cloud Build compiles the `Dockerfile` remotely (no local
 Docker; `.gcloudignore` trims the upload).
 
 ```bash
-# redeploy after changes
+# redeploy after changes — run from the repo root, so Cloud Build picks up the
+# Dockerfile ("Building using Dockerfile" in the output; "Building using
+# Buildpacks" means you are in the wrong directory and the build will fail)
 gcloud run deploy finprint --source . --memory 2Gi --cpu 1 \
-  --region us-central1 --project study-autopilot --allow-unauthenticated
+  --region us-central1 --project study-autopilot --allow-unauthenticated \
+  --update-env-vars "FINPRINT_GIT_SHA=$(git rev-parse HEAD)"
 ```
+
+### Which commit is live?
+
+The running service reports the commit it was deployed from, so "did my change
+actually ship?" has an answer that does not depend on remembering:
+
+```bash
+# the deployed commit vs. your local HEAD
+curl -s https://finprint.ethanyanxu.com/api/health | jq -r .version
+git rev-parse HEAD
+```
+
+The page prints the short form in its footer too (`· build 959657c`). The value
+comes from `FINPRINT_GIT_SHA`, set by the deploy command above and by CI; a
+deploy that omits it reports `unknown` rather than a stale SHA, because a wrong
+answer here would be believed. Locally it is always `unknown`, and the footer
+hides it.
 
 ### Continuous deployment
 
