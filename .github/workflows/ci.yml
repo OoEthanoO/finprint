@@ -27,3 +27,63 @@ jobs:
 
       - name: Run tests
         run: pytest tests/ -q
+
+  # Redeploy the live Cloud Run service on every push to main — but only after
+  # the tests above pass, so a red build cannot reach https://finprint.ethanyanxu.com.
+  # Pull requests never reach this job (the `push` check below), so a fork PR
+  # cannot trigger a deploy.
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      # Two commits landing close together would otherwise race to deploy and
+      # the older one could win. Newer push cancels the older deploy.
+      group: deploy-cloud-run
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      id-token: write          # required to mint the OIDC token for GCP
+    steps:
+      - uses: actions/checkout@v4
+
+      # Workload Identity Federation: GitHub proves its identity to GCP with a
+      # short-lived OIDC token, so there is no long-lived service-account key in
+      # this repo's secrets to leak or rotate. Both values below are non-secret
+      # identifiers, which is why they are `vars` rather than `secrets`.
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # Same command as DEPLOY.md documents for a manual redeploy; Cloud Build
+      # compiles the Dockerfile remotely, so nothing here needs Docker.
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy finprint \
+            --source . \
+            --region us-central1 \
+            --project study-autopilot \
+            --memory 2Gi --cpu 1 \
+            --allow-unauthenticated \
+            --quiet
+
+      # A deploy that "succeeded" but serves a broken container should fail the
+      # build rather than sit green. The app's lifespan hook completes warm-up
+      # before the port opens, so a ready revision can genuinely answer.
+      - name: Verify the new revision is serving
+        run: |
+          url=$(gcloud run services describe finprint \
+            --region us-central1 --project study-autopilot \
+            --format='value(status.url)')
+          echo "checking $url/api/health"
+          for i in $(seq 1 10); do
+            if curl -fsS --max-time 60 "$url/api/health" | tee /dev/stderr | grep -q '"status":"ok"'; then
+              echo "healthy"; exit 0
+            fi
+            echo "attempt $i failed; retrying in 15s"; sleep 15
+          done
+          echo "service did not become healthy"; exit 1

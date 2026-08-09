@@ -22,6 +22,73 @@ gcloud run deploy finprint --source . --memory 2Gi --cpu 1 \
   --region us-central1 --project study-autopilot --allow-unauthenticated
 ```
 
+### Continuous deployment
+
+Every push to `main` redeploys automatically, from the `deploy` job in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml). It `needs: test`, so a
+failing suite blocks the deploy rather than shipping a red build; pull requests
+never reach it. After deploying it polls `/api/health` and fails the run if the
+new revision never answers.
+
+Auth is **Workload Identity Federation** — GitHub mints a short-lived OIDC token
+and impersonates a deploy service account. There is no service-account key in the
+repo to leak or rotate, and the provider is pinned to this one repository, so no
+other repo can impersonate it. The two GitHub *variables* it reads
+(`GCP_WIF_PROVIDER`, `GCP_DEPLOY_SA`) are non-secret identifiers, not credentials.
+
+<details>
+<summary>One-time setup (already done — kept for rebuilding the project)</summary>
+
+```bash
+PROJECT=study-autopilot
+REPO=OoEthanoO/finprint
+SA=github-deploy
+PROJECT_NUM=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
+SA_EMAIL="$SA@$PROJECT.iam.gserviceaccount.com"
+
+gcloud services enable iamcredentials.googleapis.com run.googleapis.com \
+  cloudbuild.googleapis.com artifactregistry.googleapis.com --project "$PROJECT"
+
+gcloud iam service-accounts create "$SA" \
+  --display-name="GitHub Actions deployer" --project "$PROJECT"
+
+# What `gcloud run deploy --source` actually touches: it submits a Cloud Build,
+# pushes the image to Artifact Registry, stages the source in GCS, and acts as
+# the runtime service account.
+for role in roles/run.admin roles/cloudbuild.builds.editor \
+            roles/artifactregistry.admin roles/storage.admin \
+            roles/iam.serviceAccountUser roles/logging.viewer; do
+  gcloud projects add-iam-policy-binding "$PROJECT" \
+    --member="serviceAccount:$SA_EMAIL" --role="$role" --condition=None
+done
+
+gcloud iam workload-identity-pools create github \
+  --location=global --project "$PROJECT"
+
+# The attribute-condition is the security boundary: without it, any GitHub repo
+# on the internet could mint a token for this provider.
+gcloud iam workload-identity-pools providers create-oidc github \
+  --location=global --workload-identity-pool=github --project "$PROJECT" \
+  --issuer-uri="https://token.actions.githubusercontent.com" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
+  --attribute-condition="assertion.repository=='$REPO'"
+
+gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" --project "$PROJECT" \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUM/locations/global/workloadIdentityPools/github/attribute.repository/$REPO"
+
+gh variable set GCP_DEPLOY_SA --repo "$REPO" --body "$SA_EMAIL"
+gh variable set GCP_WIF_PROVIDER --repo "$REPO" \
+  --body "projects/$PROJECT_NUM/locations/global/workloadIdentityPools/github/providers/github"
+```
+
+</details>
+
+Every push to `main` costs a full remote image build (a few minutes; the torch
+layer is cached). If doc-only commits start feeling wasteful, add a
+`paths-ignore` for `**.md` and `reports/**` to the workflow's `push` trigger —
+nothing under those paths is served.
+
 The custom domain was wired once and needs no maintenance:
 
 ```bash
