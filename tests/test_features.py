@@ -6,7 +6,7 @@ than by silently hanging on a long clip in production.
 import numpy as np
 
 import finprint.config as C
-from finprint.features import _autocorrelate, _pulse_rate, extract
+from finprint.features import _autocorrelate, _pulse_rate, extract, snr_db
 from signals import pulse_train, tone, white_noise
 
 SR = C.SAMPLE_RATE
@@ -53,3 +53,52 @@ def test_pulse_rate_is_zero_for_broadband_noise():
 def test_pulse_rate_detects_a_known_modulation_rate():
     r = _pulse_rate(pulse_train(2000, 20.0, 3.0), SR)
     assert 18.0 < r < 22.0                                     # ~20 pulses/s
+
+
+# --- blind SNR estimate ----------------------------------------------------
+# The estimate has one job: order clips by how far the call rises above the
+# background. These pin that ordering and the rough calibration, not exact
+# values -- the number is a measurement of the clip, and a threshold that reads
+# it belongs with real clips, not here.
+
+def test_snr_estimate_tracks_added_noise():
+    """A call at a known SNR reads back at roughly that SNR."""
+    from finprint.degrade import add_noise
+
+    call = tone(6000, 1.5)
+    for target in (20.0, 10.0, 0.0):
+        rng = np.random.default_rng(7)
+        got = snr_db(add_noise(call, target, rng))
+        assert abs(got - target) < 4.0, f"{target} dB read as {got}"
+
+
+def test_snr_estimate_is_high_for_a_clean_call_and_low_for_noise():
+    assert snr_db(tone(3000, 1.5)) > 30.0
+    assert snr_db(white_noise(2.0)) < 0.0
+
+
+def test_snr_estimate_survives_a_call_with_no_quiet_frames():
+    """The reason the estimate is spectral rather than temporal.
+
+    `extract` trims silence and analyses the loudest window, so a clean clip
+    arrives as very nearly all call. An estimator that read its noise floor from
+    the quiet *frames* would find only call there and score a pristine recording
+    as buried -- which is exactly backwards.
+    """
+    continuous = tone(5000, 4.0)          # fills the whole analysis window
+    assert snr_db(continuous) > 30.0
+
+
+def test_snr_estimate_is_bounded_on_degenerate_input():
+    """No inf, no NaN -- this is serialised into the API response."""
+    for w in (np.zeros(SR, dtype=np.float32),
+              np.full(SR, 0.4, dtype=np.float32),
+              np.array([], dtype=np.float32)):
+        v = snr_db(w)
+        assert np.isfinite(v) and -31.0 <= v <= 61.0
+
+
+def test_snr_db_matches_the_value_extract_reports():
+    """The cheap path and the full path must not drift apart."""
+    w = tone(2200, 1.5, noise=0.01, seed=5)
+    assert abs(snr_db(w) - extract(w).snr_db) < 0.05

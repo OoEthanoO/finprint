@@ -30,7 +30,7 @@ layer), all in a small web app.
 | **Group** (toothed whale / baleen whale / pinniped) | the top species' family, with its summed probability | ✅ derived from the CNN — **0.979** on held-out data |
 | **Species** (32 marine mammals) | CNN over log-mel spectrograms | ✅ yes, on the WMMS dataset — 0.906 |
 | **Call type** (click / burst-pulse / whistle / song-moan / broadband) | rules over measured acoustic features | ➖ signal analysis, not a trained model |
-| **Acoustic features** (dominant freq, bandwidth, f0 contour, pulse rate, …) | librosa DSP | ➖ direct measurement |
+| **Acoustic features** (dominant freq, bandwidth, f0 contour, pulse rate, signal-to-noise, …) | librosa DSP | ➖ direct measurement |
 
 The app leads with the **group** because the model's mistakes stay inside the
 family — it confuses one dolphin for another, not a dolphin for a seal. So the

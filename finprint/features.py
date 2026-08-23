@@ -39,6 +39,7 @@ class AcousticFeatures:
     f0_range_hz: float
     voiced_fraction: float      # share of frames with a detectable pitch
     pulse_rate_hz: float        # repetition rate of the amplitude envelope
+    snr_db: float               # call energy over the background floor
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -74,6 +75,112 @@ def _energy_edges(mag: np.ndarray, freqs: np.ndarray) -> tuple[float, float]:
     lo = float(freqs[np.searchsorted(cdf, 0.05)])
     hi = float(freqs[min(np.searchsorted(cdf, 0.95), len(freqs) - 1)])
     return lo, hi
+
+
+def _spectrum(seg: np.ndarray, sr: int):
+    """STFT magnitude of an analysis window, with its loud/quiet frame masks.
+
+    Separates the call (loud frames) from the background (quiet frames). Marine
+    recordings carry heavy, often non-stationary low-frequency ocean noise, so
+    everything downstream works from the loudest frames and subtracts a
+    background spectrum estimated from the quiet ones.
+    """
+    n_fft = min(C.N_FFT, len(seg)) if len(seg) >= 256 else 256
+    hop = n_fft // 4
+    S = np.abs(librosa.stft(seg, n_fft=n_fft, hop_length=hop)) + 1e-10
+    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    frame_energy = S.sum(axis=0)
+    loud = frame_energy >= np.percentile(frame_energy, 75)
+    quiet = frame_energy <= np.percentile(frame_energy, 35)
+    return S, freqs, loud, quiet
+
+
+def _analysis_window(wav: np.ndarray, sr: int) -> tuple[np.ndarray, float]:
+    """The stretch of audio every measurement describes, and the clip duration.
+
+    DC-removed, silence-trimmed, then the loudest C.ANALYSIS_SECONDS of what is
+    left — the same window the species CNN classifies. Duration is of the whole
+    trimmed clip, which is the one figure that describes the recording rather
+    than the window.
+    """
+    wav = np.asarray(wav, dtype=np.float32).ravel()
+    wav = wav - float(wav.mean())          # remove DC offset
+    trimmed = trim_silence(wav, top_db=30.0)
+    if trimmed.size < sr * 0.01:
+        trimmed = wav
+    return loudest_window(trimmed, C.ANALYSIS_SAMPLES), len(trimmed) / sr
+
+
+# Reporting bounds for the SNR estimate. A clean archive recording can put the
+# call 10^6 above its noise floor, and "inf dB" is not a useful thing to print
+# beside the other measurements; 60 dB is already far past any threshold that
+# reads this.
+_SNR_FLOOR_DB = -30.0
+_SNR_CEIL_DB = 60.0
+
+# Share of frequency bins taken to hold background rather than call. The
+# estimate below is a ratio of the rest to these, so it is really asking "how
+# much of the spectrum sticks up above its own quietest tenth".
+_NOISE_QUANTILE = 0.10
+
+
+def _snr_db(S: np.ndarray, freqs: np.ndarray, loud: np.ndarray) -> float:
+    """How far the call rises above the background, in dB.
+
+    Blind: there is no clean reference to compare against, so the background is
+    estimated from the clip itself. The estimate is *spectral* — the noise floor
+    is a low quantile across frequency of the call frames' mean power spectrum,
+    and the call is whatever stands above it.
+
+    The obvious alternative, estimating the floor from the quiet *frames*, was
+    tried first and is wrong here. `extract` trims silence and then analyses the
+    loudest window, so a clean clip arrives as very nearly all call: its quietest
+    frames are call too, the floor comes out at call level, and a pristine
+    recording scores the same as one buried in noise. Across frequency there is
+    always somewhere the call is not, even for a broadband click.
+
+    Roughly calibrated in real dB — white noise added at 0 dB SNR reads near 0 —
+    but only roughly, so the threshold that reads it is set by measurement on
+    real clips (see `finprint.quality`), not derived from this docstring.
+    """
+    P = S.astype(np.float64) ** 2
+    keep = freqs >= C.F_MIN                     # DC and rumble are not the call
+    if keep.any():
+        P = P[keep]
+    if P.size == 0:
+        return _SNR_FLOOR_DB
+
+    # Average over the call frames before taking the quantile. A single frame of
+    # white noise has a wildly spread spectrum (its own quietest bins sit ~7 dB
+    # under its mean), so an unaveraged floor would credit pure noise with
+    # several dB of structure it does not have.
+    spec = P[:, loud].mean(axis=1) if loud.any() else P.mean(axis=1)
+
+    floor = float(np.quantile(spec, _NOISE_QUANTILE))
+    if floor <= 0:
+        return _SNR_CEIL_DB
+    excess = float(np.maximum(spec - floor, 0.0).sum())
+    if excess <= 0:
+        return _SNR_FLOOR_DB
+    return float(np.clip(10.0 * np.log10(excess / (floor * spec.size)),
+                         _SNR_FLOOR_DB, _SNR_CEIL_DB))
+
+
+def snr_db(wav: np.ndarray, sr: int = C.SAMPLE_RATE) -> float:
+    """The SNR estimate alone, for callers that do not need the rest.
+
+    `extract` is dominated by pitch tracking — roughly a second per clip — so a
+    batch job sweeping thousands of degraded waveforms (scripts/robustness.py)
+    cannot afford it just to read one number. This costs an STFT.
+    """
+    wav = np.asarray(wav, dtype=np.float32).ravel()
+    if wav.size == 0:
+        return _SNR_FLOOR_DB
+    seg, _ = _analysis_window(wav, sr)
+    if seg.size == 0:
+        return _SNR_FLOOR_DB
+    S, freqs, loud, _ = _spectrum(seg, sr)
+    return _snr_db(S, freqs, loud)
 
 
 def _autocorrelate(env: np.ndarray) -> np.ndarray:
@@ -126,33 +233,14 @@ def _pulse_rate(wav: np.ndarray, sr: int) -> float:
 
 
 def extract(wav: np.ndarray, sr: int = C.SAMPLE_RATE) -> AcousticFeatures:
-    wav = np.asarray(wav, dtype=np.float32).ravel()
-    wav = wav - float(wav.mean())          # remove DC offset
-    # trim silence so duration reflects the actual call
-    trimmed = trim_silence(wav, top_db=30)
-    if trimmed.size < sr * 0.01:
-        trimmed = wav
-    duration = len(trimmed) / sr
-
     # Measure the loudest ANALYSIS_SECONDS rather than the whole recording. Pitch
     # tracking and envelope autocorrelation both cost time proportional to length,
     # and a 2-minute upload otherwise turns one request into minutes of CPU. This
     # is also the window the species CNN sees, so the numbers below describe the
     # call it classified. Clips already shorter than the window are measured whole.
-    seg = loudest_window(trimmed, C.ANALYSIS_SAMPLES)
+    seg, duration = _analysis_window(wav, sr)
 
-    n_fft = min(C.N_FFT, len(seg)) if len(seg) >= 256 else 256
-    hop = n_fft // 4
-    S = np.abs(librosa.stft(seg, n_fft=n_fft, hop_length=hop)) + 1e-10
-    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
-
-    # Separate the call (loud frames) from the background (quiet frames).
-    # Marine recordings carry heavy, often non-stationary low-frequency ocean
-    # noise, so we work from the loudest frames and subtract the background
-    # spectrum estimated from the quiet frames.
-    frame_energy = S.sum(axis=0)
-    loud = frame_energy >= np.percentile(frame_energy, 75)
-    quiet = frame_energy <= np.percentile(frame_energy, 35)
+    S, freqs, loud, quiet = _spectrum(seg, sr)
     bg = (S[:, quiet].mean(axis=1, keepdims=True) if quiet.any()
           else np.median(S, axis=1, keepdims=True))
 
@@ -170,6 +258,8 @@ def extract(wav: np.ndarray, sr: int = C.SAMPLE_RATE) -> AcousticFeatures:
     zcr = float(np.mean(librosa.feature.zero_crossing_rate(seg)))
     lo, hi = _energy_edges(Scl, freqs)
 
+    snr = _snr_db(S, freqs, loud)
+
     f0_mean, f0_range, voiced = _pitch(seg, sr)
     pulse = _pulse_rate(seg, sr)
 
@@ -186,6 +276,7 @@ def extract(wav: np.ndarray, sr: int = C.SAMPLE_RATE) -> AcousticFeatures:
         f0_range_hz=round(f0_range, 1),
         voiced_fraction=round(voiced, 3),
         pulse_rate_hz=round(pulse, 1),
+        snr_db=round(snr, 1),
     )
 
 
