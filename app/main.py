@@ -161,18 +161,26 @@ async def api_predict(file: UploadFile = File(...)):
     if not data:
         raise HTTPException(400, "empty upload")
 
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
+    # `NamedTemporaryFile(delete=True)` is the obvious spelling and the wrong
+    # one: on Windows the handle it keeps open is exclusive, so librosa cannot
+    # reopen the path by name and *every* upload fails to decode. Production is
+    # Linux, which is why that never showed up there. Closing the handle before
+    # decoding and unlinking the file ourselves works on both.
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    try:
         tmp.write(data)
-        tmp.flush()
+        tmp.close()
         try:
             # predict() is ~0.7 s of blocking CPU work (mostly pitch tracking).
             # Calling it directly from this coroutine parks the event loop for
             # that whole time, and the loop is what serves everything else — a
             # page load during a single upload measured 1.84 s instead of 1 ms.
-            # A worker thread keeps the loop free; the temp file stays alive
-            # because we await inside its `with` block.
+            # A worker thread keeps the loop free.
             result = await run_in_threadpool(predict, tmp.name)
         except Exception as exc:  # decode / inference failure
             raise HTTPException(422, f"could not process audio: {exc}") from exc
+    finally:
+        tmp.close()                      # no-op when already closed above
+        os.unlink(tmp.name)
 
     return JSONResponse(result)
