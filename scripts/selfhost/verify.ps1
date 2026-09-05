@@ -44,6 +44,28 @@ $dnsTask = Get-ScheduledTask -TaskName "finprint-dns" -ErrorAction SilentlyConti
 if ($dnsTask) { Pass "finprint-dns registered (dynamic IP will be tracked)" }
 else { Warn "finprint-dns not installed - a change of public IP will take the site down until you fix DNS by hand" }
 
+# The launchers hard-code absolute paths to caddy and ffmpeg because winget puts
+# both under the user profile while these services run as SYSTEM. If a re-install
+# moved either one, the failure is silent: Caddy simply never listens, and
+# mp3/m4a/webm uploads fail to decode while wav/flac/ogg keep working.
+Section "Tool paths baked into the launchers"
+foreach ($f in @("run-app.cmd", "run-caddy.cmd")) {
+    $p = Join-Path $PSScriptRoot $f
+    if (-not (Test-Path $p)) { Fail "$f missing - run setup.ps1" ; continue }
+    $missing = @()
+    foreach ($m in [regex]::Matches((Get-Content $p -Raw), '"([A-Za-z]:\\[^"]+\.exe)"')) {
+        $exe = $m.Groups[1].Value
+        if (-not (Test-Path $exe)) { $missing += $exe }
+    }
+    if ($missing) { Fail "$f references missing executables: $($missing -join ', ') - re-run setup.ps1" }
+    else { Pass "$f executable paths all resolve" }
+}
+if (Get-NetTCPConnection -State Listen -LocalPort 443 -ErrorAction SilentlyContinue) {
+    Pass "something is listening on 443"
+} else {
+    Fail "nothing is listening on 443 - Caddy is not actually running"
+}
+
 # --- 2. app on localhost --------------------------------------------------
 Section "App on 127.0.0.1:$Port"
 $local = $null
