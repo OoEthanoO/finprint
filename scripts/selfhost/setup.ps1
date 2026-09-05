@@ -420,7 +420,18 @@ if (-not $ok) {
     # "Only one usage of each socket address", so the old process keeps serving
     # the OLD Caddyfile while 443 continues to look perfectly healthy.
     Stop-PortOwners @(80, 443, 2019)
-    Start-Sleep -Seconds 2
+    # The port sweep alone is not enough for Caddy. An instance that has been
+    # started but has not yet bound its listeners owns no socket, so nothing
+    # above sees it - and moments later it takes 2019 and the replacement dies.
+    # That orphan then keeps serving while its scheduled task reports Ready.
+    # Match our own binary by path, so an unrelated Caddy is never touched.
+    Get-Process -Name caddy -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -eq $CaddyExe } |
+        ForEach-Object {
+            Info "stopping caddy pid $($_.Id)"
+            Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+        }
+    Start-Sleep -Seconds 3
     Start-ScheduledTask -TaskName "finprint-caddy"
     # "Started the task" is not "the server is up". A task whose process exits
     # immediately drops straight back to Ready and reports no error anywhere
