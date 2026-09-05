@@ -350,14 +350,22 @@ Step "Starting"
 # leftover uvicorn keeps port $Port. The new instance would then fail to bind
 # and the health check below would pass happily against the OLD build. Clearing
 # it out first is what makes re-running setup.ps1 genuinely idempotent.
+#
+# Target the port's listener rather than "python.exe whose command line mentions
+# uvicorn": matching by command line depends on being able to read another
+# SYSTEM process's command line, and anything it misses still owns the socket.
 Stop-ScheduledTask -TaskName "finprint-app" -ErrorAction SilentlyContinue
-Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -like "*uvicorn*app.main*" } |
-    ForEach-Object {
-        Info "stopping leftover uvicorn pid $($_.ProcessId)"
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-    }
 Start-Sleep -Seconds 2
+$owners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty OwningProcess -Unique)
+foreach ($procId in $owners) {
+    if ($procId -and $procId -gt 4) {
+        $pn = (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName
+        Info "stopping pid $procId ($pn) holding port $Port"
+        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+    }
+}
+Start-Sleep -Seconds 3
 Start-ScheduledTask -TaskName "finprint-app"
 
 # Which commit *should* be serving. Checking the version rather than just

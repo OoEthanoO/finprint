@@ -38,6 +38,32 @@ $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { throw "Run this in an Administrator PowerShell (it restarts SYSTEM scheduled tasks)." }
 
+# Free the port the app has to bind, and confirm it actually came free.
+#
+# Identifying the old process by command line ("python.exe running uvicorn") is
+# not reliable enough: it depends on being able to read another SYSTEM process's
+# command line, and any process it fails to match still owns the socket. The
+# replacement then exits because it cannot bind, the health check finds the OLD
+# build answering, and the deploy looks fine while shipping nothing. Whatever is
+# listening on the port is the thing in the way, so target that.
+function Stop-AppOnPort($p) {
+    $owners = @(Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique)
+    foreach ($procId in $owners) {
+        # PIDs 0 and 4 are System/Idle and are never ours.
+        if ($procId -and $procId -gt 4) {
+            $n = (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName
+            Info "stopping pid $procId ($n) holding port $p"
+            Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+        }
+    }
+    for ($i = 1; $i -le 15; $i++) {
+        if (-not (Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue)) { return $true }
+        Start-Sleep -Seconds 1
+    }
+    return $false
+}
+
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $VenvPy = Join-Path $Root ".venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPy)) { throw "No .venv at $Root - run setup.ps1 first." }
@@ -77,14 +103,9 @@ Good "done"
 Step "Restarting"
 Stop-ScheduledTask -TaskName "finprint-app" -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 3
-# Stop-ScheduledTask asks the task to end; a uvicorn that ignored it would keep
-# the port and the new process would fail to bind, so make sure it is gone.
-Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -like "*uvicorn*app.main*" } |
-    ForEach-Object {
-        Info "stopping leftover uvicorn pid $($_.ProcessId)"
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-    }
+if (-not (Stop-AppOnPort $Port)) {
+    throw "Port $Port is still held after trying to free it. Find the owner with: netstat -ano -p tcp | findstr $Port"
+}
 Start-ScheduledTask -TaskName "finprint-app"
 Good "finprint-app restarted"
 
