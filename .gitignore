@@ -15,5 +15,13 @@ reports/*.png
 # hf cache
 .cache/
 
+# self-hosting runtime state (scripts/selfhost). Machine-specific and, in the
+# case of the Vercel token and the Caddy certificate store, secret.
+.caches/
+logs/
+scripts/selfhost/Caddyfile
+scripts/selfhost/run-app.cmd
+scripts/selfhost/run-caddy.cmd
+
 # os
 .DS_Store

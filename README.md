@@ -147,14 +147,14 @@ the HTTP contract including the upload guard.
 
 ## Deploy
 
-**Live: <https://finprint.ethanyanxu.com>** — one container on Google Cloud Run,
-serving both the API and this page. [**DEPLOY.md**](DEPLOY.md) is the canonical
-guide (deploy command, the Fly.io and Render configs kept in-repo, and how to run
-the exact image locally).
+**Live: <https://finprint.ethanyanxu.com>** — self-hosted on a Windows laptop
+behind Caddy, serving both the API and this page. [**DEPLOY.md**](DEPLOY.md) is
+the canonical guide (setup and update scripts, the Fly.io and Render configs kept
+in-repo, and how to run the exact image locally).
 
-The whole app is one image: FastAPI serves `/api/*` and the static page together,
-so the frontend is same-origin wherever it runs — Cloud Run behind a custom
-domain, a local `uvicorn`, or a container host. Static/edge platforms (Vercel,
+The whole app is one process: FastAPI serves `/api/*` and the static page
+together, so the frontend is same-origin wherever it runs — behind a reverse
+proxy on a custom domain, a local `uvicorn`, or a container host. Static/edge platforms (Vercel,
 Cloudflare Pages) can't host the *backend* — it needs native libs, ffmpeg, and
 more than an edge runtime allows — but they can host the page on its own if you
 ever want to split them:

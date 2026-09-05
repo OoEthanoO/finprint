@@ -1,149 +1,263 @@
 # Deploying finprint
 
-finprint ships as a single container (`Dockerfile`): a FastAPI app serving the
-UI and `/api/predict`. Every host below builds the image **remotely**, so you do
-not need Docker installed locally.
+finprint runs on a **self-hosted Windows laptop**, behind Caddy, serving
+<https://finprint.ethanyanxu.com>. It used to run on Google Cloud Run; that
+deployment was removed (see [Migration off Google Cloud](#migration-off-google-cloud)).
 
-## Google Cloud Run — the live deployment
-
-Deployed as service **`finprint`** in project **`study-autopilot`**, region
-**`us-central1`**, serving at:
-
-- https://finprint.ethanyanxu.com (custom domain mapping)
-- https://finprint-999841164638.us-central1.run.app (direct)
-
-Free-tier friendly: 2 GB RAM, scale-to-zero, and demo traffic stays inside the
-always-free quota. Cloud Build compiles the `Dockerfile` remotely (no local
-Docker; `.gcloudignore` trims the upload).
-
-```bash
-# redeploy after changes — run from the repo root, so Cloud Build picks up the
-# Dockerfile ("Building using Dockerfile" in the output; "Building using
-# Buildpacks" means you are in the wrong directory and the build will fail)
-gcloud run deploy finprint --source . --memory 2Gi --cpu 1 \
-  --region us-central1 --project study-autopilot --allow-unauthenticated \
-  --update-env-vars "FINPRINT_GIT_SHA=$(git rev-parse HEAD)"
 ```
+internet
+   |
+   v  ports 80 + 443 forwarded
+router (192.168.x.1)
+   |
+   v
+Windows laptop
+   caddy.exe        :80 / :443   TLS, automatic Let's Encrypt certificate
+      |
+      v  reverse proxy
+   uvicorn app:main  127.0.0.1:8000   (.venv, Python 3.11)
+```
+
+uvicorn binds `127.0.0.1`, not `0.0.0.0`: Caddy is the only thing that can reach
+it, so the app is never exposed in plaintext, not even to the LAN.
+
+Both processes run as **scheduled tasks under SYSTEM with an at-startup
+trigger**. That is what replaces the one property Cloud Run supplied for free —
+the service comes back after a reboot, with nobody logged in.
+
+Everything below lives in [`scripts/selfhost/`](scripts/selfhost/).
+
+---
+
+## What this design requires
+
+Four things have to be true. [`preflight.ps1`](scripts/selfhost/preflight.ps1)
+checks all four before anything is installed, because each one otherwise fails
+later, in a different way, and looks like the others:
+
+| Requirement | Why | If it is false |
+|---|---|---|
+| A real public IPv4 | A port forward has to have somewhere to land | **Fatal.** On CGNAT (`100.64.0.0/10`) no router setting can help — use a tunnel (Cloudflare Tunnel) instead |
+| Router can forward 80 + 443 | Let's Encrypt validates by connecting back | Some ISPs block 80; Caddy can still use TLS-ALPN on 443 |
+| The laptop stays awake and online | It *is* the server now | `setup.ps1` disables sleep on AC; set the lid action to "Do nothing" by hand |
+| Python 3.11 | torch/torchaudio CPU wheels | `setup.ps1` installs it |
+
+## First-time setup
+
+Run all of this **on the hosting laptop**, in an **Administrator PowerShell**,
+from the repo root.
+
+```powershell
+git clone https://github.com/OoEthanoO/finprint.git
+cd finprint
+
+# 1. Check the connection can host at all. Changes nothing.
+.\scripts\selfhost\preflight.ps1
+
+# 2. Install everything: Python 3.11, ffmpeg, Caddy, the venv, the services.
+#    Slow once (torch is ~200 MB). Idempotent — safe to re-run.
+.\scripts\selfhost\setup.ps1 -AcmeEmail you@example.com
+```
+
+`setup.ps1` prints the two steps it cannot do for you:
+
+**3. Forward the ports.** In the router admin page (usually `http://<gateway>`),
+forward TCP **80** and TCP **443** to the laptop's LAN address. Also give that
+address a **DHCP reservation** — otherwise the lease eventually changes and the
+forward silently points at nothing.
+
+**4. Point the DNS record at your connection.** In the Vercel dashboard
+(`ethanyanxu.com` → DNS): delete the `CNAME finprint → ghs.googlehosted.com`
+left over from Cloud Run, and add `A finprint → <your public IP>`, TTL 60.
+
+Or do step 4 from the command line, which is also how the record stays correct
+afterwards:
+
+```powershell
+# -Force is required the first time: it authorises replacing the Cloud Run CNAME
+.\scripts\selfhost\update-dns.ps1 -Token <vercel-api-token> -Force
+```
+
+**5. Verify.**
+
+```powershell
+.\scripts\selfhost\verify.ps1
+```
+
+This walks the whole chain — services running, app answering locally, DNS
+resolving here, certificate valid, HTTPS answering, and the served commit
+matching `git HEAD`.
+
+The certificate check is the one that matters most: Let's Encrypt validates by
+connecting back **from the public internet**, so a publicly-trusted certificate
+is direct proof that the port forward is open. This machine has no other way to
+learn that about itself — a self-signed Caddy internal certificate means the
+forward is closed.
+
+## Dynamic IP
+
+Cloud Run never needed this; a home line does. When the ISP hands out a new IP,
+the A record goes stale and the site simply stops resolving to you.
+
+```powershell
+# check every 5 minutes, update Vercel when the IP moves
+.\scripts\selfhost\update-dns.ps1 -Token <vercel-api-token> -Install
+```
+
+The token is stored at `.caches\vercel-token.txt` with an ACL admitting only
+SYSTEM and Administrators, and `.gitignore` keeps it out of the repo. Note that
+**Vercel API tokens are account-wide** — there is no per-domain scope — so it is
+a real secret on a machine exposed to the internet. If that trade is not worth
+it, the alternative is to point `finprint` at a dynamic-DNS hostname with a
+`CNAME` (DuckDNS and similar), which keeps the changing part outside Vercel and
+turns the Vercel record into a constant.
+
+## Deploying a change
+
+This replaces the old "push to `main` → GitHub Actions → Cloud Run" pipeline.
+A GitHub runner has no route to a laptop behind a home router, so deploys happen
+on the host:
+
+```powershell
+.\scripts\selfhost\update.ps1
+```
+
+It pulls, installs dependencies, restarts the service, and — the part worth
+keeping from the CI job — **refuses to report success until `/api/health`
+reports the new commit**. "The deploy said OK but the old build is still live"
+was the failure the old check existed to catch, and it is still possible here.
+
+Rollback is git:
+
+```powershell
+git checkout <previous-sha>
+.\scripts\selfhost\update.ps1 -SkipPull
+```
+
+CI still runs on every push: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+runs the test suite. It just no longer deploys.
 
 ### Which commit is live?
 
-The running service reports the commit it was deployed from, so "did my change
-actually ship?" has an answer that does not depend on remembering:
-
-```bash
-# the deployed commit vs. your local HEAD
-curl -s https://finprint.ethanyanxu.com/api/health | jq -r .version
+```powershell
+(Invoke-RestMethod https://finprint.ethanyanxu.com/api/health).version
 git rev-parse HEAD
 ```
 
-The page prints the short form in its footer too (`· build 959657c`). The value
-comes from `FINPRINT_GIT_SHA`, set by the deploy command above and by CI; a
-deploy that omits it reports `unknown` rather than a stale SHA, because a wrong
-answer here would be believed. Locally it is always `unknown`, and the footer
-hides it.
+The page prints the short form in its footer (`· build 3bfd2e7`). This got
+*more* reliable with the move: in the container, `.gcloudignore` stripped `.git`,
+so the SHA had to be injected at deploy time and a deploy that forgot the flag
+reported `unknown`. On the laptop the repository is right there, and
+`run-app.cmd` reads `git rev-parse HEAD` at every start.
 
-### Continuous deployment
+## Operations
 
-Every push to `main` redeploys automatically, from the `deploy` job in
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml). It `needs: test`, so a
-failing suite blocks the deploy rather than shipping a red build; pull requests
-never reach it. After deploying it polls `/api/health` and fails the run if the
-new revision never answers.
+| Task | Command |
+|---|---|
+| Restart the app | `Restart-ScheduledTask -TaskName finprint-app` |
+| Restart Caddy | `Restart-ScheduledTask -TaskName finprint-caddy` |
+| Service state | `Get-ScheduledTask finprint-app, finprint-caddy` |
+| Access log | `Get-Content logs\access.log -Tail 50 -Wait` |
+| Debug the app in a console | run `scripts\selfhost\run-app.cmd` (stop the task first) |
+| Certificate store | `.caches\caddy\caddy\certificates\` |
 
-Auth is **Workload Identity Federation** — GitHub mints a short-lived OIDC token
-and impersonates a deploy service account. There is no service-account key in the
-repo to leak or rotate, and the provider is pinned to this one repository, so no
-other repo can impersonate it. The two GitHub *variables* it reads
-(`GCP_WIF_PROVIDER`, `GCP_DEPLOY_SA`) are non-secret identifiers, not credentials.
+Certificates renew automatically at ~30 days remaining, provided ports 80/443
+are still reachable. `verify.ps1` warns when expiry is close, which is the
+signal that renewal has been failing quietly.
 
-<details>
-<summary>One-time setup (already done — kept for rebuilding the project)</summary>
+## What changed, honestly
 
-```bash
-PROJECT=study-autopilot
-REPO=OoEthanoO/finprint
-SA=github-deploy
-PROJECT_NUM=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
-SA_EMAIL="$SA@$PROJECT.iam.gserviceaccount.com"
+**Better than Cloud Run:**
 
-gcloud services enable iamcredentials.googleapis.com run.googleapis.com \
-  cloudbuild.googleapis.com artifactregistry.googleapis.com --project "$PROJECT"
+* **No cold start.** The old service scaled to zero and a fresh process spent
+  ~50 s before it could answer (librosa materialising lazily-imported
+  submodules, numba JIT-compiling the pitch kernels). The process here just
+  stays up. Requests are warm-path — roughly 2 s — from the first visitor after
+  a restart onwards, and `setup.ps1` runs the warm-up before the port ever opens.
+* **No bill**, and no build minutes.
+* **Honest build identity**, as above.
 
-gcloud iam service-accounts create "$SA" \
-  --display-name="GitHub Actions deployer" --project "$PROJECT"
+**Worse than Cloud Run:**
 
-# What `gcloud run deploy --source` actually touches: it submits a Cloud Build,
-# pushes the image to Artifact Registry, stages the source in GCS, and acts as
-# the runtime service account.
-for role in roles/run.admin roles/cloudbuild.builds.editor \
-            roles/artifactregistry.admin roles/storage.admin \
-            roles/iam.serviceAccountUser roles/logging.viewer; do
-  gcloud projects add-iam-policy-binding "$PROJECT" \
-    --member="serviceAccount:$SA_EMAIL" --role="$role" --condition=None
-done
+* **Availability is now yours.** Power cuts, ISP outages, Windows Update
+  reboots, and a closed lid all take the site down. The at-startup tasks
+  handle reboots; nothing handles the rest.
+* **One machine, one uplink.** Residential upload bandwidth bounds how many
+  people can fetch a spectrogram at once, and there is no autoscaling.
+* **Your home IP is public.** `finprint.ethanyanxu.com` now resolves to your
+  house. That is inherent to port forwarding, and is the main reason a tunnel
+  (Cloudflare Tunnel) is the usual recommendation for this shape of hosting —
+  it also hides the origin.
+* **You are the security boundary.** Caddy only exposes the app, and the app
+  caps uploads at 25 MB (`config.MAX_UPLOAD_BYTES`, mirrored in the Caddyfile),
+  but this is a public endpoint on a personal machine. Keep Windows updated,
+  and do not forward anything beyond 80 and 443.
 
-gcloud iam workload-identity-pools create github \
-  --location=global --project "$PROJECT"
+## Migration off Google Cloud
 
-# The attribute-condition is the security boundary: without it, any GitHub repo
-# on the internet could mint a token for this provider.
-gcloud iam workload-identity-pools providers create-oidc github \
-  --location=global --workload-identity-pool=github --project "$PROJECT" \
-  --issuer-uri="https://token.actions.githubusercontent.com" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
-  --attribute-condition="assertion.repository=='$REPO'"
+finprint ran as Cloud Run service `finprint` in project `study-autopilot`
+(`us-central1`). The service itself was inside the always-free tier; **the cost
+was Artifact Registry**. `gcloud run deploy --source` pushes a new ~1.5 GB image
+on every deploy and nothing ever removes the old ones — 22 images had
+accumulated against a 0.5 GB free tier.
 
-gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" --project "$PROJECT" \
-  --role=roles/iam.workloadIdentityUser \
-  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUM/locations/global/workloadIdentityPools/github/attribute.repository/$REPO"
+[`teardown-gcp.ps1`](scripts/selfhost/teardown-gcp.ps1) removes the rest:
 
-gh variable set GCP_DEPLOY_SA --repo "$REPO" --body "$SA_EMAIL"
-gh variable set GCP_WIF_PROVIDER --repo "$REPO" \
-  --body "projects/$PROJECT_NUM/locations/global/workloadIdentityPools/github/providers/github"
+```powershell
+.\scripts\selfhost\teardown-gcp.ps1            # dry run — lists, deletes nothing
+.\scripts\selfhost\teardown-gcp.ps1 -Confirm   # execute
 ```
 
-</details>
+It deletes, in order: the domain mapping, the Cloud Run service, the
+`cloud-run-source-deploy` Artifact Registry repo, the `run-sources-…` build
+staging bucket, the `github-deploy` service account with its six project IAM
+bindings, and the `github` Workload Identity pool and provider.
 
-Every push to `main` costs a full remote image build (a few minutes; the torch
-layer is cached). If doc-only commits start feeling wasteful, add a
-`paths-ignore` for `**.md` and `reports/**` to the workflow's `push` trigger —
-nothing under those paths is served.
+Two safeguards, both deliberate:
 
-The custom domain was wired once and needs no maintenance:
+* **It is not a project delete.** `study-autopilot` is shared with the
+  study-autopilot app. The script only touches resources verified to belong to
+  finprint — and it re-checks at run time, refusing to delete the Artifact
+  Registry repo if a non-finprint package has appeared in it.
+* **It refuses to run while DNS still points at Cloud Run**, and while the new
+  host is not answering. Deleting the service before the cutover would take the
+  site down. `-SkipDnsCheck` overrides this if you accept that.
+
+Two GitHub repository variables outlive the teardown and need the GitHub CLI:
 
 ```bash
-gcloud beta run domain-mappings create --service finprint \
-  --domain finprint.ethanyanxu.com --region us-central1 --project study-autopilot
-vercel dns add ethanyanxu.com finprint CNAME ghs.googlehosted.com
+gh variable delete GCP_WIF_PROVIDER --repo OoEthanoO/finprint
+gh variable delete GCP_DEPLOY_SA --repo OoEthanoO/finprint
 ```
+
+They are non-secret identifiers, not credentials, and with the pool deleted they
+point at nothing — but leaving them is misleading.
 
 ## Alternatives (config kept in-repo, not currently used)
+
+The repo still ships a `Dockerfile`, so any container host remains one command
+away if self-hosting stops being worth the trouble.
 
 > Hugging Face Spaces was ruled out: Docker Spaces moved behind a paid plan
 > (mid-2026) and Spaces never supported custom domains. The `README.md`
 > frontmatter for it is harmless and kept in case that changes.
 
-### Fly.io  (`fly.toml` included) — not free
+### Fly.io (`fly.toml` included) — not free
 
 ```bash
-# one-time
-brew install flyctl        # or: curl -L https://fly.io/install.sh | sh
 fly auth login
 fly launch --copy-config --no-deploy   # accept a unique app name when prompted
-
-# every release
 fly deploy
 ```
 
-Serves at `https://<app-name>.fly.dev`. The config runs a 2 GB shared-cpu VM
-(torch OOMs on the 256 MB default) and health-checks `/api/health`.
+The config runs a 2 GB shared-cpu VM (torch OOMs on the 256 MB default) and
+health-checks `/api/health`.
 
-### Render  (`render.yaml` Blueprint included) — 2 GB tier is paid
+### Render (`render.yaml` Blueprint included) — 2 GB tier is paid
 
-1. Push this repo to GitHub.
-2. Render Dashboard → **New → Blueprint** → select the repo.
-3. Render reads `render.yaml`, builds the Dockerfile, and deploys on the
-   **Standard** plan (2 GB — Free/Starter's 512 MB OOMs on torch).
+Render Dashboard → **New → Blueprint** → select the repo. It reads
+`render.yaml`, builds the Dockerfile, and deploys on the Standard plan (2 GB —
+Free/Starter's 512 MB OOMs on torch).
 
 ### Local Docker (to test the exact image)
 
@@ -159,40 +273,24 @@ docker run -p 8000:8000 finprint
 
 - **The trained model ships in the repo.** `models/species_cnn.pt` (~2.3 MB) is
   committed — `.gitignore` tracks that one checkpoint while ignoring any other
-  `*.pt` — so `COPY . .` bakes it into the image and species prediction works on
-  a fresh clone with no retraining. It's loaded lazily on the first request. If
-  the checkpoint is ever missing, `/api/predict` still returns call type,
-  acoustic features, and the spectrogram, with `model_available: false`. To
-  refresh it, retrain (`python -m scripts.prepare_data && python -m
-  finprint.train`) and commit the new file.
-- **Cold starts (~50 s, and why).** The service scales to zero. A fresh *process*
-  spends ~50 s before it can answer, which `predict`'s stage timings attribute as:
-
-  ```
-  cold:  decode 33.0s  features 15.4s  species 1.6s  spectrogram 1.8s
-  warm:  decode  0.001s features  2.0s species 0.1s  spectrogram 0.3s
-  ```
-
-  `decode` dropping to a millisecond when warm shows it is not decoding at all:
-  it is librosa materialising its lazily-imported submodules, and numba
-  JIT-compiling the pitch kernels, on first use. Two mitigations are in place:
-
-  * `compileall` in the Dockerfile bakes `.pyc` for the dependencies (and
-    `PYTHONDONTWRITEBYTECODE` is deliberately *not* set). This more than halved
-    warm requests, 5.4 s → 2.4 s.
-  * `finprint.warmup` runs from the app's lifespan hook. uvicorn completes it
-    before binding the port, so an instance never reports ready until it can
-    actually predict — instances started ahead of traffic (deploy rollouts,
-    autoscaling) serve their first request warm.
-
-  What did *not* work, so it is not retried: baking numba's on-disk cache yields
-  only 3 entries (most librosa kernels are not cacheable), and the work is not
-  CPU-bound — `--cpu 2` measured 56.5 s against 52.1 s at `--cpu 1`. The
-  remaining cost is serial, per-process import/JIT time. Removing it means
-  either paying for a warm instance (`--min-instances 1`, ~$10–12/month) or
-  dropping librosa for direct `soundfile` + numpy/scipy DSP.
-- **Memory.** torch + librosa need ~1–2 GB resident; both configs above provision
-  2 GB. Dropping below that risks OOM on model/library load.
-- **CPU-only.** The image installs CPU torch wheels; inference runs on CPU.
-- **Image size** is ~1.5 GB (torch/torchaudio dominate). First remote build
-  takes a few minutes; subsequent builds reuse the cached dependency layer.
+  `*.pt` — so a fresh clone predicts species with no retraining. It is loaded
+  lazily on the first request. If the checkpoint is ever missing, `/api/predict`
+  still returns call type, acoustic features, and the spectrogram, with
+  `model_available: false`. To refresh it, retrain (`python -m
+  scripts.prepare_data && python -m finprint.train`) and commit the new file.
+- **Warm-up.** `finprint.warmup` runs one throwaway prediction from the app's
+  lifespan hook, and uvicorn completes it before binding the port — so the
+  process never accepts a request it cannot serve quickly. `setup.ps1` also runs
+  it once at install time to populate the on-disk matplotlib and numba caches
+  (`.caches\mpl`, `.caches\numba`), which is why a restart is fast.
+- **Bytecode is precompiled** (`compileall`, in both `setup.ps1` and
+  `update.ps1`) for the same reason the Dockerfile did it: librosa imports its
+  submodules lazily, so without cached `.pyc` every fresh process recompiles
+  them inside the first request. This more than halved warm requests, 5.4 s → 2.4 s.
+- **Memory.** torch + librosa need ~1–2 GB resident. Any laptop with 8 GB is
+  comfortable; 4 GB is tight.
+- **CPU-only.** The venv installs CPU torch wheels from PyTorch's own index;
+  the default PyPI wheel would drag in ~5 GB of CUDA this app never touches.
+- **ffmpeg** is a real dependency, not a nicety: `soundfile` handles wav/flac/ogg,
+  but mp3/m4a/webm uploads decode through librosa's audioread path, which shells
+  out to ffmpeg. The container got it from `apt`; `setup.ps1` installs it via winget.
