@@ -101,12 +101,30 @@ afterwards:
 **5. Verify.**
 
 ```powershell
-.\scripts\selfhost\verify.ps1
+.\scripts\selfhost\verify.ps1     # is the chain wired up?
+.\scripts\selfhost\smoketest.ps1  # can it actually predict?
 ```
 
-This walks the whole chain — services running, app answering locally, DNS
-resolving here, certificate valid, HTTPS answering, and the served commit
+`verify.ps1` walks the whole chain — services running, app answering locally,
+DNS resolving here, certificate valid, HTTPS answering, and the served commit
 matching `git HEAD`.
+
+`smoketest.ps1` answers the different question that `/api/health` cannot:
+whether an upload actually decodes. It generates a tone, transcodes it to mp3,
+m4a and webm, and pushes each through `/api/predict`. The compressed formats are
+the point — `soundfile` reads wav/flac/ogg in-process, so those pass even on a
+badly broken host, while the rest go through librosa's audioread path and shell
+out to **ffmpeg**, which the SYSTEM services can only find because the launcher
+bakes its directory into `PATH`. If that regresses, wav keeps working, every
+other format stops, and nothing else here would notice. It also checks the
+reported dominant frequency lands inside the generated sweep, so audio decoded
+at the wrong sample rate fails instead of passing on a `200`.
+
+Point it at the public URL to exercise Caddy too:
+
+```powershell
+.\scripts\selfhost\smoketest.ps1 -BaseUrl https://finprint.ethanyanxu.com
+```
 
 The certificate check is the one that matters most: Let's Encrypt validates by
 connecting back **from the public internet**, so a publicly-trusted certificate
@@ -184,6 +202,23 @@ reported `unknown`. On the laptop the repository is right there, and
 Certificates renew automatically at ~30 days remaining, provided ports 80/443
 are still reachable. `verify.ps1` warns when expiry is close, which is the
 signal that renewal has been failing quietly.
+
+### Restart Caddy after changing DNS
+
+Caddy tries to obtain a certificate at startup, and if the name does not yet
+resolve to this machine it retries on an exponential backoff that quickly
+stretches to hours. So after the DNS record is repointed, the certificate will
+*not* appear promptly on its own — Caddy is still asleep on a long timer:
+
+```powershell
+Restart-ScheduledTask -TaskName finprint-caddy
+Get-Content logs\caddy.log -Tail 20 -Wait   # watch the challenge succeed
+```
+
+The backoff is a feature rather than a bug. Let's Encrypt rate-limits *failed*
+validations (5 per hostname per hour), and a server retrying every few seconds
+against DNS that is not ready yet would exhaust that budget and then be locked
+out at the moment it finally could have succeeded.
 
 ### Administering the host remotely
 
