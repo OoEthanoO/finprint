@@ -51,6 +51,25 @@ param(
 $ErrorActionPreference = "Continue"
 
 function Step($t) { Write-Host ""; Write-Host "==> $t" -ForegroundColor Cyan }
+function Stop-PortOwners($ports) {
+    # Stopping a scheduled task does not reliably kill the process it started,
+    # and a survivor keeps its sockets. The replacement then cannot bind and
+    # exits, while the OLD process carries on answering - so every "is it up?"
+    # check passes and the new configuration is silently never applied. Whatever
+    # owns the socket is the thing in the way, so ask the network stack.
+    foreach ($p in $ports) {
+        $owners = @(Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique)
+        foreach ($procId in $owners) {
+            # 0 and 4 are Idle/System and are never ours.
+            if ($procId -and $procId -gt 4) {
+                $pn = (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName
+                Write-Host "    stopping pid $procId ($pn) holding port $p"
+                Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
 function Info($m) { Write-Host "    $m" }
 function Good($m) { Write-Host "    $m" -ForegroundColor Green }
 function Note($m) { Write-Host "    $m" -ForegroundColor Yellow }
@@ -362,15 +381,7 @@ Step "Starting"
 # SYSTEM process's command line, and anything it misses still owns the socket.
 Stop-ScheduledTask -TaskName "finprint-app" -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
-$owners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
-    Select-Object -ExpandProperty OwningProcess -Unique)
-foreach ($procId in $owners) {
-    if ($procId -and $procId -gt 4) {
-        $pn = (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName
-        Info "stopping pid $procId ($pn) holding port $Port"
-        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-    }
-}
+Stop-PortOwners @($Port)
 Start-Sleep -Seconds 3
 Start-ScheduledTask -TaskName "finprint-app"
 
@@ -402,6 +413,14 @@ if (-not $ok) {
     Note "API did not answer on 127.0.0.1:$Port within 200s."
     Note "Run $runApp in a console to see the error."
 } else {
+    Stop-ScheduledTask -TaskName "finprint-caddy" -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    # 2019 is Caddy's admin endpoint, and it is the port that actually bites: a
+    # surviving instance still holding it makes the replacement abort with
+    # "Only one usage of each socket address", so the old process keeps serving
+    # the OLD Caddyfile while 443 continues to look perfectly healthy.
+    Stop-PortOwners @(80, 443, 2019)
+    Start-Sleep -Seconds 2
     Start-ScheduledTask -TaskName "finprint-caddy"
     # "Started the task" is not "the server is up". A task whose process exits
     # immediately drops straight back to Ready and reports no error anywhere
@@ -410,7 +429,12 @@ if (-not $ok) {
     $caddyUp = $false
     for ($i = 1; $i -le 10; $i++) {
         Start-Sleep -Seconds 3
-        if (Get-NetTCPConnection -State Listen -LocalPort 443 -ErrorAction SilentlyContinue) { $caddyUp = $true; break }
+        $listening = [bool](Get-NetTCPConnection -State Listen -LocalPort 443 -ErrorAction SilentlyContinue)
+        $running = (Get-ScheduledTask -TaskName "finprint-caddy").State -eq 'Running'
+        # Both conditions, deliberately. A listener on 443 alone can be a
+        # survivor from a previous run serving the old config, and a Running
+        # task alone does not prove the process got as far as binding.
+        if ($listening -and $running) { $caddyUp = $true; break }
     }
     if ($caddyUp) {
         Good "Caddy is listening on 443"
