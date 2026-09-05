@@ -18,6 +18,7 @@ Called from two places:
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 import time
 
@@ -38,11 +39,15 @@ def _synthetic_clip() -> np.ndarray:
     return (0.5 * np.sin(phase)).astype(np.float32)
 
 
-def run() -> float:
+def run(*, strict: bool = False) -> float:
     """Run one throwaway prediction. Returns how long it took, in seconds.
 
-    Never raises: a failed warm-up should cost the first request its latency,
-    not stop the service from starting.
+    ``strict=False`` (the app-startup path) never raises: a failed warm-up
+    should cost the first request its latency, not stop the service starting.
+
+    ``strict=True`` re-raises instead, for the ``scripts.warmup`` entry point,
+    whose whole purpose is to prove this machine can predict. Swallowing the
+    failure there turns a smoke test into a no-op that always reports success.
     """
     # Imported here rather than at module scope so that importing this module is
     # itself cheap, and so a broken checkpoint cannot break startup.
@@ -50,10 +55,26 @@ def run() -> float:
 
     started = time.perf_counter()
     try:
-        with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+        # NamedTemporaryFile(delete=True) is the obvious spelling and the wrong
+        # one: on Windows the handle it holds open is exclusive, so soundfile
+        # cannot reopen the path by name and warm-up fails on every start. This
+        # is the same trap that broke uploads in app.main (fixed in 28d379a);
+        # this file was missed because Linux tolerates it and CI runs on Linux.
+        # Closing the handle before writing, and unlinking ourselves, works on
+        # both platforms.
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        try:
+            tmp.close()
             sf.write(tmp.name, _synthetic_clip(), C.SAMPLE_RATE)
             predict(tmp.name, with_spectrogram=True)
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
     except Exception:
+        if strict:
+            raise
         log.exception("warm-up failed; first request will pay the cost instead")
         return time.perf_counter() - started
 

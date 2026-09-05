@@ -20,7 +20,16 @@ from finprint.warmup import run  # noqa: E402
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
-    print(f"warmup ok in {run():.1f}s")
+    # strict=True, because this entry point exists to prove the machine can
+    # actually predict. It previously printed "warmup ok" and returned 0 even
+    # when the prediction had thrown, so setup.ps1 and the Docker build both
+    # reported a successful smoke test off a warm-up that never ran.
+    try:
+        elapsed = run(strict=True)
+    except Exception:
+        logging.exception("warm-up FAILED")
+        return 1
+    print(f"warmup ok in {elapsed:.1f}s")
     return 0
 
 
