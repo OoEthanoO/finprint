@@ -35,7 +35,9 @@ param(
     [switch]$Uninstall
 )
 
-$ErrorActionPreference = "Stop"
+# Continue, not Stop: under "Stop", Windows PowerShell 5.1 promotes anything a
+# native executable writes to stderr (icacls here) into a terminating error.
+$ErrorActionPreference = "Continue"
 
 function Step($t) { Write-Host ""; Write-Host "==> $t" -ForegroundColor Cyan }
 function Info($m) { Write-Host "    $m" }

@@ -38,7 +38,17 @@ param(
     [switch]$SkipWarmup
 )
 
-$ErrorActionPreference = "Stop"
+# Continue, not Stop, and deliberately so. In Windows PowerShell 5.1 anything a
+# native executable writes to stderr is wrapped in a NativeCommandError, which
+# under "Stop" becomes a *terminating* error. That is fatal for this script:
+# `py -3.11 --version` announcing "No suitable Python runtime found" is how the
+# probe reports "not installed", and pip prints deprecation notices to stderr on
+# a perfectly good install. Under "Stop" both abort the run.
+#
+# So failure is detected explicitly instead: every native call that must succeed
+# is followed by a $LASTEXITCODE check that throws, and cmdlets that must not
+# fail silently carry -ErrorAction Stop.
+$ErrorActionPreference = "Continue"
 
 function Step($t) { Write-Host ""; Write-Host "==> $t" -ForegroundColor Cyan }
 function Info($m) { Write-Host "    $m" }
@@ -170,7 +180,7 @@ set PYTHONUNBUFFERED=1
 REM 127.0.0.1, not 0.0.0.0: Caddy is the only thing that may reach the app, so
 REM nothing on the LAN can talk to it in plaintext.
 "$VenvPy" -m uvicorn app.main:app --host 127.0.0.1 --port $Port
-"@ | Set-Content -Path $runApp -Encoding ASCII
+"@ | Set-Content -Path $runApp -Encoding ASCII -ErrorAction Stop
 
 $runCaddy = Join-Path $Here "run-caddy.cmd"
 @"
@@ -184,7 +194,7 @@ set XDG_DATA_HOME=$Caches\caddy
 set XDG_CONFIG_HOME=$Caches\caddy
 
 caddy run --config "$Here\Caddyfile"
-"@ | Set-Content -Path $runCaddy -Encoding ASCII
+"@ | Set-Content -Path $runCaddy -Encoding ASCII -ErrorAction Stop
 Good "wrote run-app.cmd and run-caddy.cmd"
 
 # --- 4. Caddyfile ---------------------------------------------------------
@@ -225,7 +235,7 @@ $Domain {
 		}
 	}
 }
-"@ | Set-Content -Path (Join-Path $Here "Caddyfile") -Encoding UTF8
+"@ | Set-Content -Path (Join-Path $Here "Caddyfile") -Encoding UTF8 -ErrorAction Stop
 Good "wrote Caddyfile for $Domain"
 
 & caddy fmt --overwrite (Join-Path $Here "Caddyfile") *> $null
@@ -242,7 +252,7 @@ foreach ($r in @(@{ n = "finprint HTTP (80)"; p = 80 }, @{ n = "finprint HTTPS (
         Good "$($r.n) rule already present"
     } else {
         New-NetFirewallRule -DisplayName $r.n -Direction Inbound -Action Allow `
-            -Protocol TCP -LocalPort $r.p -Profile Any | Out-Null
+            -Protocol TCP -LocalPort $r.p -Profile Any -ErrorAction Stop | Out-Null
         Good "opened inbound TCP $($r.p)"
     }
 }
@@ -291,7 +301,7 @@ function Register-FinprintTask($name, $cmd, $desc) {
         Unregister-ScheduledTask -TaskName $name -Confirm:$false
     }
     Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger `
-        -Principal $principal -Settings $settings -Description $desc | Out-Null
+        -Principal $principal -Settings $settings -Description $desc -ErrorAction Stop | Out-Null
     Good "registered task '$name'"
 }
 Register-FinprintTask "finprint-app"   $runApp   "finprint API (uvicorn on 127.0.0.1:$Port)"

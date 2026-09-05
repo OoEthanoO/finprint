@@ -35,7 +35,11 @@ param(
     [switch]$Uninstall
 )
 
-$ErrorActionPreference = "Stop"
+# Continue, not Stop: under "Stop", Windows PowerShell 5.1 promotes anything a
+# native executable writes to stderr (icacls here) into a terminating error.
+# The Vercel calls below ask for -ErrorAction Stop explicitly so their try/catch
+# still fires.
+$ErrorActionPreference = "Continue"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $TokenFile = Join-Path $Root ".caches\vercel-token.txt"
 $TaskName = "finprint-dns"
@@ -116,7 +120,7 @@ $headers = @{ Authorization = "Bearer $Token" }
 function Invoke-Vercel($method, $url, $body) {
     # Not named $args: that is an automatic variable inside a function, and
     # shadowing it is a trap for whoever edits this next.
-    $req = @{ Uri = $url; Method = $method; Headers = $headers; TimeoutSec = 30 }
+    $req = @{ Uri = $url; Method = $method; Headers = $headers; TimeoutSec = 30; ErrorAction = 'Stop' }
     if ($body) {
         $req.Body = ($body | ConvertTo-Json -Compress)
         $req.ContentType = "application/json"

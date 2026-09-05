@@ -22,7 +22,12 @@ param(
     [int]$Port = 8000
 )
 
-$ErrorActionPreference = "Stop"
+# Continue, not Stop. Under "Stop", Windows PowerShell 5.1 turns anything a
+# native executable writes to stderr into a terminating error - and `git pull`
+# reports "From https://github.com/..." on stderr on a perfectly successful
+# pull, as pip does for deprecation notices. Failure is caught explicitly below
+# through $LASTEXITCODE and throw.
+$ErrorActionPreference = "Continue"
 
 function Step($t) { Write-Host ""; Write-Host "==> $t" -ForegroundColor Cyan }
 function Info($m) { Write-Host "    $m" }
