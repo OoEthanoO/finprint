@@ -231,7 +231,13 @@ set XDG_CONFIG_HOME=$Caches\caddy
 
 REM Absolute path, not "caddy": winget installed it under the user profile and
 REM this task runs as SYSTEM, which does not have that directory on its PATH.
-"$CaddyExe" run --config "$Here\Caddyfile"
+REM
+REM Caddy logs to stderr, and a scheduled task has no console, so without this
+REM redirect its output is simply lost -- including the ACME errors that explain
+REM why a certificate has not been issued, which is the single most likely thing
+REM to go wrong here. The Caddyfile's own `log` directive covers site access
+REM only; this captures the server's diagnostics.
+"$CaddyExe" run --config "$Here\Caddyfile" >> "$Root\logs\caddy.log" 2>&1
 "@ | Set-Content -Path $runCaddy -Encoding ASCII -ErrorAction Stop
 Good "wrote run-app.cmd and run-caddy.cmd"
 

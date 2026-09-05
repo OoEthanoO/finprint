@@ -110,6 +110,7 @@ try {
     Pass "subject: $($cert.Subject), expires $($cert.NotAfter.ToString('yyyy-MM-dd')) ($days days)"
     if ($cert.Issuer -match "Caddy Local|localhost") {
         Fail "this is Caddy internal CA certificate, not a public one - Let's Encrypt could not reach this machine (port forward closed?)"
+        Warn "why it failed is in logs\caddy.log on the host"
     } else {
         Pass "publicly-trusted certificate - Let's Encrypt reached this machine, so the port forward is open"
     }
