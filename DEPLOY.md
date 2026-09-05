@@ -52,12 +52,32 @@ git clone https://github.com/OoEthanoO/finprint.git
 cd finprint
 
 # 1. Check the connection can host at all. Changes nothing.
-.\scripts\selfhost\preflight.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\selfhost\preflight.ps1
 
 # 2. Install everything: Python 3.11, ffmpeg, Caddy, the venv, the services.
 #    Slow once (torch is ~200 MB). Idempotent — safe to re-run.
-.\scripts\selfhost\setup.ps1 -AcmeEmail you@example.com
+powershell -ExecutionPolicy Bypass -File .\scripts\selfhost\setup.ps1 -AcmeEmail you@example.com
 ```
+
+### Why `-ExecutionPolicy Bypass`
+
+A default Windows install refuses to run unsigned `.ps1` files at all:
+
+```
+... cannot be loaded because running scripts is disabled on this system.
+```
+
+Launching a child `powershell` with `-ExecutionPolicy Bypass` relaxes that for
+one invocation and changes nothing permanent — preferable to
+`Set-ExecutionPolicy`, which is a lasting change to the machine and is not
+needed here. Elevation is inherited, so an Administrator prompt stays
+Administrator. The scheduled tasks are unaffected either way: they already
+invoke PowerShell with the flag, and `run-app.cmd` / `run-caddy.cmd` are batch
+files, which the policy does not govern.
+
+The same prefix applies to every script below (`verify.ps1`, `update.ps1`,
+`enable-ssh.ps1`, `teardown-gcp.ps1`); it is omitted from later examples for
+readability.
 
 `setup.ps1` prints the two steps it cannot do for you:
 
@@ -164,6 +184,30 @@ reported `unknown`. On the laptop the repository is right there, and
 Certificates renew automatically at ~30 days remaining, provided ports 80/443
 are still reachable. `verify.ps1` warns when expiry is close, which is the
 signal that renewal has been failing quietly.
+
+### Administering the host remotely
+
+The host is a laptop, and sitting in front of it to run `update.ps1` gets old.
+[`enable-ssh.ps1`](scripts/selfhost/enable-ssh.ps1) turns on the OpenSSH server
+that Windows ships but disables, once, from that machine:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\selfhost\enable-ssh.ps1
+```
+
+Two things it does that are easy to get wrong by hand:
+
+* **Port 22 is scoped to the local subnet**, and Windows' own Any-scoped
+  `OpenSSH-Server-In-TCP` rule is disabled. SSH must not become internet-facing
+  — only 80 and 443 belong in the router forward.
+* **The key goes in `%ProgramData%\ssh\administrators_authorized_keys`**, with
+  its ACL reduced to Administrators and SYSTEM. For an account in the
+  Administrators group, Windows OpenSSH ignores `~/.ssh/authorized_keys`
+  entirely, and rejects the file outright if its permissions are looser than
+  that. Neither failure produces a useful error.
+
+`enable-ssh.ps1 -Uninstall` reverses all of it, removing only the deploy key so
+a key you added yourself survives.
 
 ## What changed, honestly
 
