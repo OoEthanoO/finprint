@@ -346,16 +346,40 @@ Register-FinprintTask "finprint-app"   $runApp   "finprint API (uvicorn on 127.0
 Register-FinprintTask "finprint-caddy" $runCaddy "finprint HTTPS reverse proxy (Caddy on 80/443)"
 
 Step "Starting"
+# Re-registering a task does not kill the process it previously started, and a
+# leftover uvicorn keeps port $Port. The new instance would then fail to bind
+# and the health check below would pass happily against the OLD build. Clearing
+# it out first is what makes re-running setup.ps1 genuinely idempotent.
+Stop-ScheduledTask -TaskName "finprint-app" -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*uvicorn*app.main*" } |
+    ForEach-Object {
+        Info "stopping leftover uvicorn pid $($_.ProcessId)"
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+Start-Sleep -Seconds 2
 Start-ScheduledTask -TaskName "finprint-app"
+
+# Which commit *should* be serving. Checking the version rather than just
+# "something answered" is what catches a stale process still holding the port.
+$HeadSha = ""
+if ($GitExe) {
+    $HeadSha = & $GitExe -C $Root rev-parse HEAD 2>$null
+    if ($HeadSha) { $HeadSha = $HeadSha.Trim() }
+}
+
 Info "waiting for the API to answer (warm-up runs before the port opens) ..."
 $ok = $false
 for ($i = 1; $i -le 40; $i++) {
     Start-Sleep -Seconds 5
     try {
         $h = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/health" -TimeoutSec 10
-        if ($h.status -eq "ok") {
+        if ($h.status -eq "ok" -and (-not $HeadSha -or $h.version -eq $HeadSha)) {
             Good "API healthy - version $($h.version), model_available=$($h.model_available)"
             $ok = $true; break
+        }
+        if ($h.status -eq "ok") {
+            Info "  answering, but reports $($h.version.Substring(0,7)) - waiting for the new process"
         }
     } catch { }
     if ($i % 4 -eq 0) { Info "  still starting ... ($($i * 5)s)" }
