@@ -51,25 +51,6 @@ param(
 $ErrorActionPreference = "Continue"
 
 function Step($t) { Write-Host ""; Write-Host "==> $t" -ForegroundColor Cyan }
-function Stop-PortOwners($ports) {
-    # Stopping a scheduled task does not reliably kill the process it started,
-    # and a survivor keeps its sockets. The replacement then cannot bind and
-    # exits, while the OLD process carries on answering - so every "is it up?"
-    # check passes and the new configuration is silently never applied. Whatever
-    # owns the socket is the thing in the way, so ask the network stack.
-    foreach ($p in $ports) {
-        $owners = @(Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty OwningProcess -Unique)
-        foreach ($procId in $owners) {
-            # 0 and 4 are Idle/System and are never ours.
-            if ($procId -and $procId -gt 4) {
-                $pn = (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName
-                Write-Host "    stopping pid $procId ($pn) holding port $p"
-                Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-            }
-        }
-    }
-}
 function Info($m) { Write-Host "    $m" }
 function Good($m) { Write-Host "    $m" -ForegroundColor Green }
 function Note($m) { Write-Host "    $m" -ForegroundColor Yellow }
@@ -87,6 +68,13 @@ if (-not (Test-Path (Join-Path $Root "app\main.py"))) {
     throw "Could not find app\main.py under '$Root' - run this script from inside the finprint repo."
 }
 Info "repo root: $Root"
+
+# Stop-FinprintService: stops only processes belonging to *this* deployment,
+# identified by launcher path and process tree rather than by whoever happens to
+# own a port. Killing the port's owner was the earlier approach here and it was
+# too blunt - if any unrelated program were listening on 8000, setup would have
+# terminated it.
+. (Join-Path $Here "service-control.ps1")
 
 $Venv = Join-Path $Root ".venv"
 $VenvPy = Join-Path $Venv "Scripts\python.exe"
@@ -376,13 +364,10 @@ Step "Starting"
 # and the health check below would pass happily against the OLD build. Clearing
 # it out first is what makes re-running setup.ps1 genuinely idempotent.
 #
-# Target the port's listener rather than "python.exe whose command line mentions
-# uvicorn": matching by command line depends on being able to read another
-# SYSTEM process's command line, and anything it misses still owns the socket.
-Stop-ScheduledTask -TaskName "finprint-app" -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 2
-Stop-PortOwners @($Port)
-Start-Sleep -Seconds 3
+# Stop-FinprintService walks this deployment's own process tree from its
+# launcher, and throws if the port is still held rather than starting a process
+# that cannot bind.
+Stop-FinprintService -TaskName "finprint-app" -Root $Root -Port $Port
 Start-ScheduledTask -TaskName "finprint-app"
 
 # Which commit *should* be serving. Checking the version rather than just
@@ -413,25 +398,14 @@ if (-not $ok) {
     Note "API did not answer on 127.0.0.1:$Port within 200s."
     Note "Run $runApp in a console to see the error."
 } else {
-    Stop-ScheduledTask -TaskName "finprint-caddy" -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
     # 2019 is Caddy's admin endpoint, and it is the port that actually bites: a
     # surviving instance still holding it makes the replacement abort with
     # "Only one usage of each socket address", so the old process keeps serving
     # the OLD Caddyfile while 443 continues to look perfectly healthy.
-    Stop-PortOwners @(80, 443, 2019)
-    # The port sweep alone is not enough for Caddy. An instance that has been
-    # started but has not yet bound its listeners owns no socket, so nothing
-    # above sees it - and moments later it takes 2019 and the replacement dies.
-    # That orphan then keeps serving while its scheduled task reports Ready.
-    # Match our own binary by path, so an unrelated Caddy is never touched.
-    Get-Process -Name caddy -ErrorAction SilentlyContinue |
-        Where-Object { $_.Path -eq $CaddyExe } |
-        ForEach-Object {
-            Info "stopping caddy pid $($_.Id)"
-            Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
-        }
-    Start-Sleep -Seconds 3
+    # Stop-FinprintService identifies our instance by its process tree and its
+    # --config path, so a Caddy that has started but not yet bound anything is
+    # still caught, and an unrelated Caddy on this machine is left alone.
+    Stop-FinprintService -TaskName "finprint-caddy" -Root $Root -Port $Port
     Start-ScheduledTask -TaskName "finprint-caddy"
     # "Started the task" is not "the server is up". A task whose process exits
     # immediately drops straight back to Ready and reports no error anywhere
