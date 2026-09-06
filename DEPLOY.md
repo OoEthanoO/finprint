@@ -192,12 +192,19 @@ reported `unknown`. On the laptop the repository is right there, and
 
 | Task | Command |
 |---|---|
-| Restart the app | `Restart-ScheduledTask -TaskName finprint-app` |
-| Restart Caddy | `Restart-ScheduledTask -TaskName finprint-caddy` |
+| Restart the app | `.\scripts\selfhost\restart.ps1 -Service app` |
+| Restart Caddy | `.\scripts\selfhost\restart.ps1 -Service caddy` |
 | Service state | `Get-ScheduledTask finprint-app, finprint-caddy` |
 | Access log | `Get-Content logs\access.log -Tail 50 -Wait` |
 | Debug the app in a console | run `scripts\selfhost\run-app.cmd` (stop the task first) |
 | Certificate store | `.caches\caddy\caddy\certificates\` |
+
+Prefer `restart.ps1` over `Restart-ScheduledTask`: stopping a task does not
+reliably kill the process it started, and a survivor keeps the port, so the
+replacement exits and the old build carries on serving while every check passes.
+`restart.ps1` stops this deployment's own process tree (never merely "whatever
+owns port 8000", which on a personal machine could be something else entirely),
+waits for the port to come free, and then confirms the endpoint answers again.
 
 Certificates renew automatically at ~30 days remaining, provided ports 80/443
 are still reachable. `verify.ps1` warns when expiry is close, which is the
