@@ -18,7 +18,13 @@
 [CmdletBinding()]
 param(
     [string]$Domain = "finprint.ethanyanxu.com",
-    [int]$Port = 8000
+    [int]$Port = 8000,
+    # Skip the checks that leave the machine and come back (certificate, public
+    # HTTPS, the http->https redirect). Run this ON the host when the router will
+    # not hairpin a packet from a host to its own public IP: those checks then
+    # fail for a reason that has nothing to do with whether the site works for
+    # everyone else. Run them from another machine instead.
+    [switch]$SkipPublicChecks
 )
 
 $ErrorActionPreference = "Continue"
@@ -97,12 +103,39 @@ try {
 }
 
 # --- 4. certificate -------------------------------------------------------
+if ($SkipPublicChecks) {
+    Section "Public checks"
+    Warn "skipped (-SkipPublicChecks): certificate, public HTTPS and the http->https redirect"
+    Warn "run them from another machine: .\scripts\selfhost\verify.ps1 (no switch) or"
+    Warn ".\scripts\selfhost\smoketest.ps1 -BaseUrl https://$Domain"
+    Write-Host ""
+    if ($script:Fail -gt 0) {
+        Write-Host "VERIFY FAILED: $($script:Fail) problem(s) in the local checks." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "LOCAL CHECKS OK - the public path was not tested." -ForegroundColor Green
+    exit 0
+}
+
 Section "TLS certificate"
+$tcp = $null
+$ssl = $null
 try {
     $tcp = New-Object System.Net.Sockets.TcpClient
+    # TcpClient.Connect() takes no timeout, and ReceiveTimeout/SendTimeout apply
+    # only once a connection exists - so a swallowed SYN blocks here forever.
+    # That is not hypothetical on this host: the name resolves to our OWN public
+    # IP, so the connection has to hairpin out to the router and back. Plenty of
+    # routers decline to hairpin a packet from a host to itself and drop it
+    # silently, and this script then hung instead of reporting anything.
+    $async = $tcp.BeginConnect($Domain, 443, $null, $null)
+    if (-not $async.AsyncWaitHandle.WaitOne(10000, $false)) {
+        throw "no answer from ${Domain}:443 within 10s (NAT hairpin, if you are running this on the host itself)"
+    }
+    $tcp.EndConnect($async)
     $tcp.ReceiveTimeout = 15000; $tcp.SendTimeout = 15000
-    $tcp.Connect($Domain, 443)
     $ssl = New-Object System.Net.Security.SslStream($tcp.GetStream(), $false, { $true })
+    $ssl.ReadTimeout = 15000; $ssl.WriteTimeout = 15000
     $ssl.AuthenticateAsClient($Domain)
     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($ssl.RemoteCertificate)
     $days = [int]($cert.NotAfter - (Get-Date)).TotalDays
@@ -115,9 +148,14 @@ try {
         Pass "publicly-trusted certificate - Let's Encrypt reached this machine, so the port forward is open"
     }
     if ($days -lt 14) { Warn "renewal window is close; Caddy renews at ~30 days left - check it can still reach port 80/443" }
-    $ssl.Dispose(); $tcp.Close()
 } catch {
-    Fail "TLS handshake with $Domain failed: $($_.Exception.Message)"
+    Fail "TLS check against $Domain failed: $($_.Exception.Message)"
+    Warn "if this host cannot reach its own public IP, that is NAT hairpin, not an outage -"
+    Warn "re-run the public checks from another machine: verify.ps1 -SkipPublicChecks here,"
+    Warn "and smoketest.ps1 -BaseUrl https://$Domain from elsewhere."
+} finally {
+    if ($ssl) { $ssl.Dispose() }
+    if ($tcp) { $tcp.Close() }
 }
 
 # --- 5. public HTTPS ------------------------------------------------------
