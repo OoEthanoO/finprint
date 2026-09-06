@@ -281,13 +281,31 @@ a key you added yourself survives.
 
 ## Migration off Google Cloud
 
+**Done — 2026-09-05.** Nothing belonging to finprint remains in Google Cloud.
+
 finprint ran as Cloud Run service `finprint` in project `study-autopilot`
 (`us-central1`). The service itself was inside the always-free tier; **the cost
 was Artifact Registry**. `gcloud run deploy --source` pushes a new ~1.5 GB image
 on every deploy and nothing ever removes the old ones — 22 images had
 accumulated against a 0.5 GB free tier.
 
-[`teardown-gcp.ps1`](scripts/selfhost/teardown-gcp.ps1) removes the rest:
+The cutover order was chosen so the domain was never dark: the host was built
+and verified first, then the DNS record was repointed, then Caddy was restarted
+to force certificate issuance, and only once `https://finprint.ethanyanxu.com`
+answered from the laptop was anything deleted in GCP.
+
+Two GitHub repository variables outlive the teardown, because deleting them
+needs the GitHub CLI rather than gcloud. They are non-secret identifiers
+(`GCP_WIF_PROVIDER`, `GCP_DEPLOY_SA`) that now point at deleted resources, and
+`ci.yml` no longer reads them — harmless, but misleading if left:
+
+```bash
+gh variable delete GCP_WIF_PROVIDER --repo OoEthanoO/finprint
+gh variable delete GCP_DEPLOY_SA --repo OoEthanoO/finprint
+```
+
+[`teardown-gcp.ps1`](scripts/selfhost/teardown-gcp.ps1) is what did it, and is
+kept for reference (and for rebuilding the project elsewhere):
 
 ```powershell
 .\scripts\selfhost\teardown-gcp.ps1            # dry run — lists, deletes nothing
@@ -308,16 +326,6 @@ Two safeguards, both deliberate:
 * **It refuses to run while DNS still points at Cloud Run**, and while the new
   host is not answering. Deleting the service before the cutover would take the
   site down. `-SkipDnsCheck` overrides this if you accept that.
-
-Two GitHub repository variables outlive the teardown and need the GitHub CLI:
-
-```bash
-gh variable delete GCP_WIF_PROVIDER --repo OoEthanoO/finprint
-gh variable delete GCP_DEPLOY_SA --repo OoEthanoO/finprint
-```
-
-They are non-secret identifiers, not credentials, and with the pool deleted they
-point at nothing — but leaving them is misleading.
 
 ## Alternatives (config kept in-repo, not currently used)
 
