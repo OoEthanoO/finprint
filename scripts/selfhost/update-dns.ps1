@@ -69,8 +69,17 @@ if (-not $Token) {
 
 # --- install --------------------------------------------------------------
 if ($Install) {
+    # Registering a SYSTEM task needs an elevated shell. Check before touching
+    # anything: without this, a non-elevated run stored the token, failed to
+    # register the task, and still went on to report the task as registered.
+    $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+    ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $admin) {
+        throw "-Install registers a SYSTEM scheduled task, which needs an Administrator PowerShell. Right-click PowerShell > Run as administrator, then re-run."
+    }
+
     New-Item -ItemType Directory -Force -Path (Split-Path $TokenFile) | Out-Null
-    Set-Content -Path $TokenFile -Value $Token -Encoding ASCII -NoNewline
+    Set-Content -Path $TokenFile -Value $Token -Encoding ASCII -NoNewline -ErrorAction Stop
 
     # Lock the file down: inheritance off, then only SYSTEM and Administrators.
     # A plaintext account-wide token readable by every local user would be a
@@ -81,7 +90,7 @@ if ($Install) {
         $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
             $id, "FullControl", "Allow")))
     }
-    Set-Acl -Path $TokenFile -AclObject $acl
+    Set-Acl -Path $TokenFile -AclObject $acl -ErrorAction Stop
     Good "stored token at $TokenFile (SYSTEM + Administrators only)"
 
     $action = New-ScheduledTaskAction -Execute "powershell.exe" `
@@ -100,7 +109,11 @@ if ($Install) {
     }
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($trigger, $repeat) `
         -Principal $principal -Settings $settings `
-        -Description "Keep $Fqdn pointing at this connection public IP" | Out-Null
+        -Description "Keep $Fqdn pointing at this connection public IP" -ErrorAction Stop | Out-Null
+    # Report what exists, not what was attempted.
+    if (-not (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
+        throw "Task '$TaskName' is not registered after Register-ScheduledTask returned."
+    }
     Good "registered task '$TaskName' (every 5 minutes)"
     Info "running one update now ..."
 }
